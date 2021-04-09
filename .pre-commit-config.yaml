@@ -1,0 +1,25 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v3.2.0
+  hooks:
+  -   id: trailing-whitespace
+  -   id: end-of-file-fixer
+  -   id: check-yaml
+  -   id: check-added-large-files
+
+- repo: http://github.com/timothycrosley/isort
+  rev: 5.3.2
+  hooks:
+  - id: isort
+
+- repo: https://github.com/pre-commit/mirrors-yapf
+  rev: v0.31.0
+  hooks:
+    - id: yapf
+
+- repo: https://gitlab.com/pycqa/flake8
+  rev: 3.8.3
+  hooks:
+  - id: flake8
