@@ -56,6 +56,7 @@ def q_value_loss(policy, critic, rng, policy_params, critic1_params, critic2_par
 
 def policy_loss(policy, critic, policy_params, critic1_params, critic2_params, rng, o_t,
                 a_t, alpha, discount):
+  alpha = jax.lax.stop_gradient(alpha)
   mean_t, logstd_t = policy.apply(policy_params, o_t)
   action_tp1_base_dist = tfd.MultivariateNormalDiag(loc=mean_t,
                                                     scale_diag=jnp.exp(logstd_t))
@@ -66,10 +67,10 @@ def policy_loss(policy, critic, policy_params, critic1_params, critic2_params, r
   q1 = critic.apply(critic1_params, o_t, squashed_action_t)
   q2 = critic.apply(critic2_params, o_t, squashed_action_t)
   q = jnp.minimum(q1, q2)
-  mean_q = q.mean()
-  mean_log_pi = action_tp1_dist.log_prob(squashed_action_t).mean()
-  return jax.lax.stop_gradient(alpha) * mean_log_pi - mean_q, jax.lax.stop_gradient(
-      mean_log_pi)
+  assert len(q.shape) == 1
+  log_prob = action_tp1_dist.log_prob(squashed_action_t)
+  assert len(log_prob.shape) == 1
+  return (alpha * log_prob - q).mean(), log_prob.mean()
 
 
 def polyak_update(old_params, new_params, rate):
