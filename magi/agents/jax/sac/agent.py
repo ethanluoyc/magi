@@ -1,16 +1,21 @@
+from os import environ
 import acme
 from acme.agents import agent
 from acme.agents.jax import actors
 from acme import core, types
-from acme.agents import replay
 from magi.agents.jax.sac import learning
 from magi.agents.jax.sac import acting
 from acme.jax import variable_utils
+from acme.adders import reverb as adders
+from acme import datasets
+import reverb
+from reverb import rate_limiters
 import jax
 import jax.numpy as jnp
 import haiku as hk
 import optax
 import dm_env
+from acme.jax import utils
 
 import tensorflow_probability
 import dataclasses
@@ -65,9 +70,10 @@ class SACConfig:
   discount: float = 0.99
   n_step: int = 1
   # Replay options
-  batch_size: int = 256  # Number of transitions per batch.
+  batch_size: int = 1024  # Number of transitions per batch.
   min_replay_size: int = 1  # Minimum replay size.
   max_replay_size: int = 1_000_000  # Maximum replay size.
+  num_seed_steps: int = 5000
 
 
 class SACAgent(agent.Agent):
@@ -76,25 +82,36 @@ class SACAgent(agent.Agent):
                environment_spec,
                policy_network,
                critic_network,
-               key,
-               min_observations=1,
-               observations_per_step=1):
-    learner_key, actor_key = jax.random.split(key)
+               key, logger=None):
+    learner_key, actor_key, explore_key = jax.random.split(key, 3)
     rng = hk.PRNGSequence(actor_key)
     config = SACConfig()
-    reverb_replay = replay.make_reverb_prioritized_nstep_replay(
-        environment_spec=environment_spec,
-        n_step=config.n_step,
-        batch_size=config.batch_size,
-        max_replay_size=config.max_replay_size,
-        min_replay_size=config.min_replay_size,
-        discount=config.discount,
-    )
-    self._server = reverb_replay.server
+    self._num_seed_steps = config.num_seed_steps
+    replay_table = reverb.Table(name=adders.DEFAULT_PRIORITY_TABLE,
+                                sampler=reverb.selectors.Uniform(),
+                                remover=reverb.selectors.Fifo(),
+                                max_size=config.max_replay_size,
+                                rate_limiter=rate_limiters.MinSize(1),
+                                signature=adders.NStepTransitionAdder.signature(
+                                    environment_spec=environment_spec))
+    self._server = reverb.Server([replay_table], port=None)
 
-    # reverb_replay = Replay()
+    # The adder is used to insert observations into replay.
+    address = f'localhost:{self._server.port}'
+    adder = adders.NStepTransitionAdder(client=reverb.Client(address),
+                                        n_step=config.n_step,
+                                        discount=config.discount)
+
+    # The dataset provides an interface to sample from replay.
+    dataset = datasets.make_reverb_dataset(server_address=address,
+                                           environment_spec=environment_spec,
+                                           batch_size=config.batch_size,
+                                           prefetch_size=4,
+                                           transition_adder=True)
+
     learner = learning.SACLearner(environment_spec, policy_network, critic_network,
-                                  reverb_replay.data_iterator, learner_key)
+                                  dataset.as_numpy_iterator(), learner_key, logger=logger)
+    self._learner = learner
     variable_client = variable_utils.VariableClient(learner, '')
 
     @jax.jit
@@ -103,15 +120,47 @@ class SACAgent(agent.Agent):
           params, jax.tree_map(lambda x: jnp.expand_dims(x, 0), observations))
       return jnp.squeeze(mean, 0), jnp.squeeze(logstd, 0)
 
-    actor = acting.SACActor(
+    self._actor = acting.SACActor(
         forward_fn,
         rng,
         variable_client,
-        reverb_replay.adder,
+        adder,
     )
-    super().__init__(
-        actor,
-        learner,
-        min_observations=max(config.batch_size, config.min_replay_size),
-        observations_per_step=observations_per_step,
-    )
+    self._random_actor = acting.RandomActor(environment_spec.actions,
+                                            rng=hk.PRNGSequence(explore_key),
+                                            adder=adder)
+    self._num_observations = 0
+
+  def select_action(self, observation: types.NestedArray) -> types.NestedArray:
+    if self._num_observations < self._num_seed_steps:
+      return self._random_actor.select_action(observation)
+    else:
+      return self._actor.select_action(observation)
+
+  def observe_first(self, timestep: dm_env.TimeStep):
+    if self._num_observations < self._num_seed_steps:
+      self._random_actor.observe_first(timestep)
+    else:
+      self._actor.observe_first(timestep)
+
+  def observe(self, action: types.NestedArray, next_timestep: dm_env.TimeStep):
+    self._num_observations += 1
+    if self._num_observations < self._num_seed_steps:
+      self._random_actor.observe(action, next_timestep)
+    else:
+      self._actor.observe(action, next_timestep)
+
+  def update(self):
+    if self._num_observations < self._num_seed_steps:
+      num_steps = 0
+    else:
+      num_steps = 1
+    for _ in range(num_steps):
+      # Run learner steps (usually means gradient steps).
+      self._learner.step()
+    if num_steps > 0:
+      # Update the actor weights when learner updates.
+      self._actor.update()
+
+  def get_variables(self, names):
+    return self._learner.get_variables(names)

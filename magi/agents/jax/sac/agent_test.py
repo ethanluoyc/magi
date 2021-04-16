@@ -13,7 +13,7 @@ from magi.agents.jax.sac.networks import (ContinuousQFunction,
 def policy_fn(action_spec):
 
   def fn(x):
-    return StateDependentGaussianPolicy(action_space=action_spec)(x)
+    return StateDependentGaussianPolicy(action_spec=action_spec)(x)
 
   return fn
 
@@ -48,7 +48,7 @@ class SACTest(absltest.TestCase):
     # Try running the environment loop. We have no assertions here because all
     from acme.utils import loggers
     # we care about is that the agent runs without raising any errors.
-    loop = acme.EnvironmentLoop(environment, agent, loggers=loggers.make_default_logger(label='environment', save_data=False))
+    loop = acme.EnvironmentLoop(environment, agent, logger=loggers.make_default_logger(label='environment', save_data=False))
     loop.run(num_episodes=200)
 
 
