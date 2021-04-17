@@ -29,8 +29,8 @@ class Trainer:
         self.env_test = env_test
 
         # Set seeds.
-        self.env.seed(seed)
-        self.env_test.seed(2 ** 31 - seed)
+        # self.env.seed(seed)
+        # self.env_test.seed(2 ** 31 - seed)
 
         # Algorithm.
         self.algo = algo
@@ -53,21 +53,32 @@ class Trainer:
         # Time to start training.
         self.start_time = time()
         # Initialize the environment.
-        state = self.env.reset()
+        import acme
+        loop = acme.EnvironmentLoop(self.env, self.algo)
+        loop.run(num_steps = int(1e6))
+        # while True:
+        #   timestep = self.env.reset()
+        #   self.algo.observe_first()
+        #   while not timestep.last():
+        #     action = self.algo.select_action(timestep.observation)
+        #     next_timestep = self.env.step(action)
+        #     self.algo.observe(action, next_timestep)
+        #     self.algo.update()
+        #     timestep = next_timestep
 
-        for step in range(1, self.num_agent_steps + 1):
-            # state = self.algo.step(self.env, state)
-            action = self.algo.select_action(state, is_eval=False)
-            next_state, reward, done, info = self.env.step(action)
-            self.algo.update()
-            self.algo.observe(state, action, reward, next_state, done)
-            if done:
-              state = self.env.reset()
-            else:
-              state = next_state
+        # for step in range(1, self.num_agent_steps + 1):
+        #     # state = self.algo.step(self.env, state)
+        #     action = self.algo.select_action(timestep.observation, is_eval=False)
+        #     next_timestep = self.env.step(action)
+        #     self.algo.update()
+        #     self.algo.observe(timestep.observation, action, timestep.reward, next_timestep.observation, done)
+        #     if done:
+        #       state = self.env.reset()
+        #     else:
+        #       state = next_state
 
-            if step % self.eval_interval == 0:
-                self.evaluate(step)
+        #     if step % self.eval_interval == 0:
+        #         self.evaluate(step)
 
     def evaluate(self, step):
         total_return = 0.0

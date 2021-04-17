@@ -36,22 +36,22 @@ class StateDependentGaussianPolicy(hk.Module):
 
     def __init__(
         self,
-        action_space,
+        action_size,
         hidden_units=(256, 256),
         log_std_min=-20.0,
         log_std_max=2.0,
         clip_log_std=True,
     ):
         super(StateDependentGaussianPolicy, self).__init__()
-        self.action_space = action_space
         self.hidden_units = hidden_units
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
         self.clip_log_std = clip_log_std
+        self.action_size = action_size
 
     def __call__(self, x):
         x = MLP(
-            2 * self.action_space.shape[0],
+            2 * self.action_size,
             self.hidden_units,
             hidden_activation=nn.relu,
         )(x)

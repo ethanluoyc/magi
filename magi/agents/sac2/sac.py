@@ -1,3 +1,4 @@
+import collections
 import math
 from functools import partial
 from typing import Any, List, Tuple
@@ -7,11 +8,19 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax as optix
-from gym.spaces import Box
+import reverb
+import tensorflow_probability
+import tree
+from acme import datasets
+from acme.adders import reverb as adders
+from acme.jax import utils
 from haiku import PRNGSequence
 from jax import nn
-from magi.agents.sac2.buffer import ReplayBuffer
-from magi.agents.sac2.network import (ContinuousQFunction, StateDependentGaussianPolicy)
+from reverb import rate_limiters
+
+tfp = tensorflow_probability.experimental.substrates.jax
+tfd = tfp.distributions
+tfb = tfp.bijectors
 
 
 @jax.jit
@@ -51,25 +60,6 @@ def gaussian_and_tanh_log_prob(
                            noise) - jnp.log(nn.relu(1.0 - jnp.square(action)) + 1e-6)
 
 
-@partial(jax.jit, static_argnums=(0, 1))
-def optimize(
-    fn_loss: Any,
-    opt: Any,
-    opt_state: Any,
-    params_to_update: hk.Params,
-    *args,
-    **kwargs,
-) -> Tuple[Any, hk.Params, jnp.ndarray, Any]:
-  (loss, aux), grad = jax.value_and_grad(fn_loss, has_aux=True)(
-      params_to_update,
-      *args,
-      **kwargs,
-  )
-  update, opt_state = opt(grad, opt_state)
-  params_to_update = optix.apply_updates(params_to_update, update)
-  return opt_state, params_to_update, loss, aux
-
-
 @partial(jax.jit, static_argnums=3)
 def reparameterize_gaussian_and_tanh(
     mean: jnp.ndarray,
@@ -104,19 +94,10 @@ def _output_to_dist(mean, logstd):
   return tfd.Independent(action_dist, 1)
 
 
-def fake_state(state_space):
-  state = state_space.sample()[None, ...]
-  if len(state_space.shape) == 1:
-    state = state.astype(np.float32)
-  return state
-
-
-def fake_action(action_space):
-  if type(action_space) == Box:
-    action = action_space.sample().astype(np.float32)[None, ...]
-  else:
-    NotImplementedError
-  return action
+def dummy_from_spec(spec):
+  if isinstance(spec, collections.OrderedDict):
+    return jax.tree_map(lambda x: x.generate_value(), spec)
+  return spec.generate_value()
 
 
 class SAC:
@@ -124,91 +105,73 @@ class SAC:
 
   def __init__(
       self,
-      num_agent_steps,
-      state_space,
-      action_space,
+      environment_spec,
+      policy_fn,
+      critic_fn,
       seed,
       gamma=0.99,
-      nstep=1,
-      num_critics=2,
       buffer_size=10**6,
       batch_size=256,
       start_steps=10000,
-      update_interval=1,
       tau=5e-3,
       lr_actor=3e-4,
       lr_critic=3e-4,
       lr_alpha=3e-4,
-      units_actor=(256, 256),
-      units_critic=(256, 256),
-      log_std_min=-20.0,
-      log_std_max=2.0,
       init_alpha=1.0,
       adam_b1_alpha=0.9,
   ):
-    np.random.seed(seed)
     self.rng = PRNGSequence(seed)
+    self._action_spec = environment_spec.actions
 
     self.agent_step = 0
     self.learning_step = 0
-    self.num_agent_steps = num_agent_steps
-    self.state_space = state_space
-    self.action_space = action_space
     self.gamma = gamma
-    self.discrete_action = False if type(action_space) == Box else True
-    if not hasattr(self, "use_key_critic"):
-      self.use_key_critic = True
-    if not hasattr(self, "use_key_actor"):
-      self.use_key_actor = True
+    replay_table = reverb.Table(name=adders.DEFAULT_PRIORITY_TABLE,
+                                sampler=reverb.selectors.Uniform(),
+                                remover=reverb.selectors.Fifo(),
+                                max_size=buffer_size,
+                                rate_limiter=rate_limiters.MinSize(1),
+                                signature=adders.NStepTransitionAdder.signature(
+                                    environment_spec=environment_spec))
+    self._server = reverb.Server([replay_table], port=None)
 
-    self.buffer = ReplayBuffer(
-        buffer_size=buffer_size,
-        state_space=state_space,
-        action_space=action_space,
-        gamma=gamma,
-        nstep=nstep,
-    )
+    # The adder is used to insert observations into replay.
+    address = f'localhost:{self._server.port}'
+    adder = adders.NStepTransitionAdder(client=reverb.Client(address),
+                                        n_step=1,
+                                        discount=1.0)
+    self._adder = adder
 
-    self.discount = gamma**nstep
+    # The dataset provides an interface to sample from replay.
+    dataset = datasets.make_reverb_dataset(server_address=address,
+                                           environment_spec=environment_spec,
+                                           batch_size=batch_size,
+                                           prefetch_size=1,
+                                           transition_adder=True)
+    self._iterator = dataset.as_numpy_iterator()
     self.batch_size = batch_size
     self.start_steps = start_steps
-    self.update_interval = update_interval
-    # self.update_interval_target = update_interval_target
+    self._update_target = jax.jit(partial(optix.incremental_update, step_size=tau))
 
-    self._update_target = jax.jit(partial(soft_update, tau=tau))
-
-    self.num_critics = num_critics
     # Define fake input for critic.
-    dummy_state = fake_state(state_space)
-    dummy_action = fake_action(action_space)
-
-    def fn_critic(s, a):
-      return ContinuousQFunction(
-          num_critics=num_critics,
-          hidden_units=units_critic,
-      )(s, a)
-
-    def fn_actor(s):
-      return StateDependentGaussianPolicy(
-          action_space=action_space,
-          hidden_units=units_actor,
-          log_std_min=log_std_min,
-          log_std_max=log_std_max,
-      )(s)
+    dummy_state = tree.map_structure(lambda x: jnp.expand_dims(x, 0),
+                                     dummy_from_spec(environment_spec.observations))
+    dummy_action = tree.map_structure(lambda x: jnp.expand_dims(x, 0),
+                                      dummy_from_spec(environment_spec.actions))
 
     # Critic.
-    self.critic = hk.without_apply_rng(hk.transform(fn_critic))
+    self.critic = hk.without_apply_rng(hk.transform(critic_fn))
     self.params_critic = self.params_critic_target = self.critic.init(
         next(self.rng), dummy_state, dummy_action)
     opt_init, self.opt_critic = optix.adam(lr_critic)
     self.opt_state_critic = opt_init(self.params_critic)
     # Actor.
-    self.actor = hk.without_apply_rng(hk.transform(fn_actor))
+    self.actor = hk.without_apply_rng(hk.transform(policy_fn))
     self.params_actor = self.actor.init(next(self.rng), dummy_state)
     opt_init, self.opt_actor = optix.adam(lr_actor)
     self.opt_state_actor = opt_init(self.params_actor)
     # Entropy coefficient.
-    self.target_entropy = -float(self.action_space.shape[0])
+    self.target_entropy = -float(environment_spec.actions.shape[0])
     self.log_alpha = jnp.array(np.log(init_alpha), dtype=jnp.float32)
     opt_init, self.opt_alpha = optix.adam(lr_alpha, b1=adam_b1_alpha)
     self.opt_state_alpha = opt_init(self.log_alpha)
@@ -217,8 +180,7 @@ class SAC:
     def _update_actor(params_actor, opt_state, key, params_critic, log_alpha, state):
       (loss, aux), grad = jax.value_and_grad(self._loss_actor,
                                              has_aux=True)(params_actor, params_critic,
-                                                           log_alpha, state,
-                                                           key)
+                                                           log_alpha, state, key)
       update, opt_state = self.opt_actor(grad, opt_state)
       params_actor = optix.apply_updates(params_actor, update)
       return params_actor, opt_state, loss, aux
@@ -234,23 +196,24 @@ class SAC:
         state,
         action,
         reward,
-        done,
+        discount,
         next_state,
         weight,
     ):
-      (loss, aux), grad = jax.value_and_grad(self._loss_critic,
-                                             has_aux=True)(params_critic,
-                                                           params_critic_target,
-                                                           params_actor, log_alpha,
-                                                           state, action, reward, done,
-                                                           next_state, weight, key)
+      (loss,
+       aux), grad = jax.value_and_grad(self._loss_critic,
+                                       has_aux=True)(params_critic,
+                                                     params_critic_target, params_actor,
+                                                     log_alpha, state, action, reward,
+                                                     discount, next_state, weight, key)
       update, opt_state = self.opt_critic(grad, opt_state)
       params_critic = optix.apply_updates(params_critic, update)
       return params_critic, opt_state, loss, aux
 
     @jax.jit
     def _update_alpha(log_alpha, opt_state, mean_log_pi):
-      (loss, aux), grad = jax.value_and_grad(self._loss_alpha, has_aux=True)(log_alpha, mean_log_pi)
+      (loss, aux), grad = jax.value_and_grad(self._loss_alpha,
+                                             has_aux=True)(log_alpha, mean_log_pi)
       update, opt_state = self.opt_alpha(grad, opt_state)
       log_alpha = optix.apply_updates(log_alpha, update)
       return log_alpha, opt_state, loss, aux
@@ -303,14 +266,17 @@ class SAC:
 
   def select_action(self, state, is_eval=True):
     if is_eval:
-      action = self._select_action(self.params_actor, state[None, ...])
-      return np.array(action[0])
+      action = self._select_action(self.params_actor, utils.add_batch_dim(state))
+      return utils.to_numpy_squeeze(action)
     else:
       if self.agent_step < self.start_steps:
-        action = self.action_space.sample()
+        # action = self.action_space.sample()
+        action = tfd.Uniform(low=self._action_spec.minimum,
+                             high=self._action_spec.maximum).sample(seed=next(self.rng))
       else:
-        action = self._explore(self.params_actor, state[None, ...], next(self.rng))
-      return np.array(action[0])
+        action = self._explore(self.params_actor, utils.add_batch_dim(state),
+                               next(self.rng))
+      return utils.to_numpy_squeeze(action)
 
   @partial(jax.jit, static_argnums=0)
   def _select_action(
@@ -321,16 +287,23 @@ class SAC:
     mean, _ = self.actor.apply(params_actor, state)
     return jnp.tanh(mean)
 
-  def observe(self, state, action, reward, next_state, done):
+  def observe_first(self, timestep):
+    self._adder.add_first(timestep)
+
+  def observe(self, action, next_timestep):
     self.agent_step += 1
-    self.buffer.append(state, action, reward, done, next_state)
+    self._adder.add(action, next_timestep)
 
   def update(self):
     if self.agent_step < self.start_steps:
       return
-    self.learning_step += 1
-    weight, batch = self.buffer.sample(self.batch_size)
-    state, action, reward, done, next_state = batch
+    # weight, batch = self.buffer.sample(self.batch_size)
+    # state, action, reward, done, next_state = batch
+    batch = next(self._iterator)
+    state, action, reward, discount, next_state = batch.data
+    # No PER for now
+    weight = jnp.ones_like(reward)
+    discount = discount * self.gamma
 
     # Update critic.
     self.params_critic, self.opt_state_critic, loss_critic, abs_td = self._update_critic(
@@ -343,7 +316,7 @@ class SAC:
         state=state,
         action=action,
         reward=reward,
-        done=done,
+        discount=discount,
         next_state=next_state,
         weight=weight,
     )
@@ -354,16 +327,16 @@ class SAC:
         key=next(self.rng),
         params_critic=self.params_critic,
         log_alpha=self.log_alpha,
-        state=state
-    )
+        state=state)
     self.log_alpha, self.opt_state_alpha, loss_alpha, _ = self._update_alpha(
         self.log_alpha,
         self.opt_state_alpha,
         mean_log_pi=mean_log_pi,
     )
+    self.learning_step += 1
     # Update target network.
-    self.params_critic_target = self._update_target(self.params_critic_target,
-                                                    self.params_critic)
+    self.params_critic_target = self._update_target(self.params_critic,
+                                                    self.params_critic_target)
 
   @partial(jax.jit, static_argnums=0)
   def _sample_action(
@@ -376,39 +349,30 @@ class SAC:
     return reparameterize_gaussian_and_tanh(mean, log_std, key, True)
 
   @partial(jax.jit, static_argnums=0)
-  def _calculate_log_pi(
-      self,
-      action: np.ndarray,
-      log_pi: np.ndarray,
-  ) -> jnp.ndarray:
-    return log_pi
-
-  @partial(jax.jit, static_argnums=0)
   def _calculate_target(
       self,
       params_critic_target: hk.Params,
       log_alpha: jnp.ndarray,
       reward: np.ndarray,
-      done: np.ndarray,
+      discount: np.ndarray,
       next_state: np.ndarray,
       next_action: jnp.ndarray,
       next_log_pi: jnp.ndarray,
   ) -> jnp.ndarray:
     next_q = self._calculate_value(params_critic_target, next_state, next_action)
-    next_q -= jnp.exp(log_alpha) * self._calculate_log_pi(next_action, next_log_pi)
+    next_q -= jnp.exp(log_alpha) * next_log_pi
     assert len(next_q.shape) == 1
     assert len(reward.shape) == 1
-    assert len(done.shape) == 1
-    return jax.lax.stop_gradient(reward + (1.0 - done) * self.discount * next_q)
+    return jax.lax.stop_gradient(reward + discount * next_q)
 
   @partial(jax.jit, static_argnums=0)
   def _loss_critic(self, params_critic: hk.Params, params_critic_target: hk.Params,
                    params_actor: hk.Params, log_alpha: jnp.ndarray, state: np.ndarray,
-                   action: np.ndarray, reward: np.ndarray, done: np.ndarray,
+                   action: np.ndarray, reward: np.ndarray, discount: np.ndarray,
                    next_state: np.ndarray, weight: np.ndarray or List[jnp.ndarray],
                    key) -> Tuple[jnp.ndarray, jnp.ndarray]:
     next_action, next_log_pi = self._sample_action(params_actor, next_state, key)
-    target = self._calculate_target(params_critic_target, log_alpha, reward, done,
+    target = self._calculate_target(params_critic_target, log_alpha, reward, discount,
                                     next_state, next_action, next_log_pi)
     q_list = self._calculate_value_list(params_critic, state, action)
     return self._calculate_loss_critic_and_abs_td(q_list, target, weight)
@@ -419,7 +383,7 @@ class SAC:
                   key) -> Tuple[jnp.ndarray, jnp.ndarray]:
     action, log_pi = self._sample_action(params_actor, state, key)
     mean_q = self._calculate_value(params_critic, state, action).mean()
-    mean_log_pi = self._calculate_log_pi(action, log_pi).mean()
+    mean_log_pi = log_pi.mean()
     return jax.lax.stop_gradient(
         jnp.exp(log_alpha)) * mean_log_pi - mean_q, jax.lax.stop_gradient(mean_log_pi)
 

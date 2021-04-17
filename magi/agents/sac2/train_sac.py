@@ -1,47 +1,64 @@
 import argparse
-import glfw
-import os
-from datetime import datetime
 
+import acme
+import numpy as np
+from acme import specs
+from acme import wrappers
+from dm_control import suite
 from magi.agents.sac2.sac import SAC
-from magi.agents.sac2.dmc import make_dmc_env
-from magi.agents.sac2.trainer import Trainer
+
+def make_dmc_env(domain_name, task_name):
+  env = suite.load(domain_name=domain_name,
+                   task_name=task_name,
+                   environment_kwargs={"flat_observation": True},
+                   task_kwargs={'random': 0})
+  # env = GymWrapper(env)
+  env = wrappers.CanonicalSpecWrapper(env)
+  env = wrappers.SinglePrecisionWrapper(env)
+  return env
 
 
 def run(args):
-    env = make_dmc_env(args.domain_name, args.task_name, args.action_repeat)
-    env_test = make_dmc_env(args.domain_name, args.task_name, args.action_repeat)
+  env = make_dmc_env(args.domain_name, args.task_name)
+  # env_test = make_dmc_env(args.domain_name, args.task_name)
 
-    algo = SAC(
-        num_agent_steps=args.num_agent_steps,
-        state_space=env.observation_space,
-        action_space=env.action_space,
-        seed=args.seed,
-    )
+  from magi.agents.sac2.network import (ContinuousQFunction,
+                                        StateDependentGaussianPolicy)
+  spec = specs.make_environment_spec(env)
+  np.random.seed(args.seed)
+  print(spec)
 
-    time = datetime.now().strftime("%Y%m%d-%H%M")
-    log_dir = os.path.join("logs", f"{args.domain_name}-{args.task_name}", f"{str(algo)}-seed{args.seed}-{time}")
+  def critic_fn(s, a):
+    return ContinuousQFunction(
+        num_critics=2,
+        hidden_units=(256, 256),
+    )(s['observations'], a)
 
-    trainer = Trainer(
-        env=env,
-        env_test=env_test,
-        algo=algo,
-        log_dir=log_dir,
-        num_agent_steps=args.num_agent_steps,
-        action_repeat=args.action_repeat,
-        eval_interval=args.eval_interval,
-        seed=args.seed,
-    )
-    trainer.train()
+  def policy_fn(s):
+    return StateDependentGaussianPolicy(
+        action_size=spec.actions.shape[0],
+        hidden_units=(256, 256),
+        log_std_min=-20,
+        log_std_max=2,
+    )(s['observations'])
+
+  algo = SAC(
+      environment_spec=spec,
+      policy_fn=policy_fn,
+      critic_fn=critic_fn,
+      seed=args.seed,
+  )
+
+  loop = acme.EnvironmentLoop(env, algo)
+  loop.run(num_steps=int(1e6))
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser()
-    p.add_argument('--domain_name', type=str, default='cartpole')
-    p.add_argument('--task_name', type=str, default='swingup')
-    p.add_argument('--action_repeat', type=int, default=1)
-    p.add_argument("--num_agent_steps", type=int, default=750000)
-    p.add_argument("--eval_interval", type=int, default=5000)
-    p.add_argument("--seed", type=int, default=0)
-    args = p.parse_args()
-    run(args)
+  p = argparse.ArgumentParser()
+  p.add_argument('--domain_name', type=str, default='cartpole')
+  p.add_argument('--task_name', type=str, default='swingup')
+  p.add_argument("--num_agent_steps", type=int, default=750000)
+  p.add_argument("--eval_interval", type=int, default=5000)
+  p.add_argument("--seed", type=int, default=0)
+  args = p.parse_args()
+  run(args)
