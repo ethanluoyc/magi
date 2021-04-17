@@ -29,12 +29,12 @@ class SACActor(core.Actor):
     self._key = next(rng)
 
     @jax.jit
-    def forward(key, observation):
+    def forward(params, key, observation):
       key, subkey = jax.random.split(key)
-      mean, logstd = forward_fn(self._params, observation)
-      action_base_dist = tfd.MultivariateNormalDiag(
+      mean, logstd = forward_fn(params, observation)
+      action_base_dist = tfd.Normal(
           loc=mean,
-          scale_diag=jnp.exp(logstd)
+          scale=jnp.exp(logstd)
       )
       action_dist = tfd.TransformedDistribution(
           action_base_dist, tfb.Tanh()
@@ -48,15 +48,14 @@ class SACActor(core.Actor):
     if self._variable_client is not None:
       self._variable_client.update_and_wait()
 
-
   def select_action(self, observation):
     # Forward.
-    action, self._key = self._forward(self._key, observation)
+    action, self._key = self._forward(self._params, self._key, observation)
     action = np.array(action)
     return action
 
   def observe_first(self, timestep: dm_env.TimeStep):
-    if self._adder:
+    if self._adder is not None:
       self._adder.add_first(timestep)
 
   def observe(
@@ -64,14 +63,12 @@ class SACActor(core.Actor):
       action,
       next_timestep: dm_env.TimeStep,
   ):
-    if not self._adder:
-      return
-
-    self._adder.add(action, next_timestep)
+    if self._adder is not None:
+      self._adder.add(action, next_timestep)
 
   def update(self, wait: bool = True): # not the default wait = False
     if self._variable_client is not None:
-      self._variable_client.update(wait)
+      self._variable_client.update_and_wait()
 
   @property
   def _params(self) -> Optional[hk.Params]:
@@ -113,7 +110,7 @@ class RandomActor(core.Actor):
     return action
 
   def observe_first(self, timestep: dm_env.TimeStep):
-    if self._adder:
+    if self._adder is not None:
       self._adder.add_first(timestep)
 
   def observe(
@@ -121,10 +118,8 @@ class RandomActor(core.Actor):
       action,
       next_timestep: dm_env.TimeStep,
   ):
-    if not self._adder:
-      return
-
-    self._adder.add(action, next_timestep)
+    if self._adder is not None:
+      self._adder.add(action, next_timestep)
 
   def update(self, wait: bool = True): # not the default wait = False
     if self._variable_client is not None:

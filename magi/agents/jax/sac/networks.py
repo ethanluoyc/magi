@@ -70,8 +70,9 @@ class ContinuousQFunction(hk.Module):
     def __init__(
         self,
         hidden_units=(256, 256),
+        name=None
     ):
-        super(ContinuousQFunction, self).__init__()
+        super(ContinuousQFunction, self).__init__(name=name)
         self.hidden_units = hidden_units
 
     def __call__(self, s, a):
@@ -80,7 +81,6 @@ class ContinuousQFunction(hk.Module):
                 1,
                 self.hidden_units,
                 hidden_activation=jax.nn.relu,
-                hidden_scale=jnp.sqrt(2),
             )(x)
         x = jnp.concatenate([s, a], axis=-1)
         return jnp.squeeze(_fn(x), axis=-1)

@@ -70,7 +70,7 @@ class SACConfig:
   discount: float = 0.99
   n_step: int = 1
   # Replay options
-  batch_size: int = 1024  # Number of transitions per batch.
+  batch_size: int = 256  # Number of transitions per batch.
   min_replay_size: int = 1  # Minimum replay size.
   max_replay_size: int = 1_000_000  # Maximum replay size.
   num_seed_steps: int = 5000
@@ -106,8 +106,9 @@ class SACAgent(agent.Agent):
     dataset = datasets.make_reverb_dataset(server_address=address,
                                            environment_spec=environment_spec,
                                            batch_size=config.batch_size,
-                                           prefetch_size=4,
+                                           prefetch_size=1,
                                            transition_adder=True)
+    self._batch_size = config.batch_size
 
     learner = learning.SACLearner(environment_spec, policy_network, critic_network,
                                   dataset.as_numpy_iterator(), learner_key, logger=logger)
@@ -150,8 +151,8 @@ class SACAgent(agent.Agent):
     else:
       self._actor.observe(action, next_timestep)
 
-  def update(self):
-    if self._num_observations < self._num_seed_steps:
+  def update(self, wait=True):
+    if self._num_observations < self._batch_size:
       num_steps = 0
     else:
       num_steps = 1
@@ -160,7 +161,7 @@ class SACAgent(agent.Agent):
       self._learner.step()
     if num_steps > 0:
       # Update the actor weights when learner updates.
-      self._actor.update()
+      self._actor.update(wait=wait)
 
   def get_variables(self, names):
     return self._learner.get_variables(names)

@@ -1,7 +1,15 @@
 import haiku as hk
 import jax.numpy as jnp
-from jax import nn
 import numpy as np
+import tensorflow_probability
+from jax import nn
+
+hk_init = hk.initializers
+tfp = tensorflow_probability.experimental.substrates.jax
+tfd = tfp.distributions
+
+Initializer = hk.initializers.Initializer
+
 class MLP(hk.Module):
     def __init__(
         self,
@@ -29,7 +37,7 @@ class MLP(hk.Module):
             x = self.output_activation(x)
         return x
 
-class StateDependentGaussianPolicy(hk.Module):
+class GaussianPolicy(hk.Module):
     """
     Policy for SAC.
     """
@@ -41,8 +49,9 @@ class StateDependentGaussianPolicy(hk.Module):
         log_std_min=-20.0,
         log_std_max=2.0,
         clip_log_std=True,
+        name=None
     ):
-        super(StateDependentGaussianPolicy, self).__init__()
+        super().__init__(name=name)
         self.hidden_units = hidden_units
         self.log_std_min = log_std_min
         self.log_std_max = log_std_max
@@ -55,25 +64,26 @@ class StateDependentGaussianPolicy(hk.Module):
             self.hidden_units,
             hidden_activation=nn.relu,
         )(x)
-        mean, log_std = jnp.split(x, 2, axis=1)
+        mean, log_std = jnp.split(x, 2, axis=-1)
         if self.clip_log_std:
             log_std = jnp.clip(log_std, self.log_std_min, self.log_std_max)
         else:
             log_std = self.log_std_min + 0.5 * (self.log_std_max - self.log_std_min) * (jnp.tanh(log_std) + 1.0)
-        return mean, log_std
 
-class ContinuousQFunction(hk.Module):
-    """
-    Critic for DDPG, TD3 and SAC.
-    """
+        # We cannot use MultivariateDiagNormal here as it does not work with the Tanh bijector.
+        # TODO(yl): Consider using the distributional heads in newer versions of acme.
+        action_tp1_base_dist = tfd.Normal(loc=mean, scale=jnp.exp(log_std))
+        action_dist = tfd.TransformedDistribution(action_tp1_base_dist, tfp.bijectors.Tanh())
+        return tfd.Independent(action_dist, 1)
 
+class DoubleCritic(hk.Module):
     def __init__(
         self,
-        num_critics=2,
         hidden_units=(256, 256),
+        name=None
     ):
-        super(ContinuousQFunction, self).__init__()
-        self.num_critics = num_critics
+        super().__init__(name=name)
+        self.num_critics = 2
         self.hidden_units = hidden_units
 
     def __call__(self, s, a):
@@ -88,4 +98,3 @@ class ContinuousQFunction(hk.Module):
         x = jnp.concatenate([s, a], axis=1)
         # Return list even if num_critics == 1 for simple implementation.
         return [_fn(x).squeeze(-1) for _ in range(self.num_critics)]
-

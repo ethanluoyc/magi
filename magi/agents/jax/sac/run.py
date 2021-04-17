@@ -17,7 +17,7 @@ from acme import wrappers
 import wandb
 
 
-_HIDDEN_UNITS = (1024, 1024)
+_HIDDEN_UNITS = (256, 256)
 
 def policy_fn(action_spec):
 
@@ -35,8 +35,9 @@ def policy_fn(action_spec):
 def critic_fn():
 
   def fn(x, a):
-    critic = ContinuousQFunction(hidden_units=_HIDDEN_UNITS)
-    return critic(x["observations"], a)
+    critic1 = ContinuousQFunction(hidden_units=_HIDDEN_UNITS, name='critic1')
+    critic2 = ContinuousQFunction(hidden_units=_HIDDEN_UNITS, name='critic2')
+    return critic1(x["observations"], a), critic2(x["observations"], a)
 
   return fn
 
@@ -45,10 +46,10 @@ def main(_):
   wandb.init(entity='ethanluoyc',
              project='magi',
              group='sac',
-             name='cheetah_run_test')
-  environment = suite.load("cheetah",
-                           "run",
-                           environment_kwargs={"flat_observation": True})
+             name='cartpole_swingup')
+  environment = suite.load("cartpole",
+                           "swingup",
+                           environment_kwargs={"flat_observation": True}, task_kwargs={'random': 0})
   environment = wrappers.CanonicalSpecWrapper(environment)
   environment = wrappers.SinglePrecisionWrapper(environment)
   spec = specs.make_environment_spec(environment)
@@ -62,7 +63,7 @@ def main(_):
                        policy_network=policy,
                        critic_network=critic,
                        key=jax.random.PRNGKey(0),
-                       logger=loggers.WandbLogger(label='learner', log_every_n_steps=1000))
+                       logger=loggers.WandbLogger(label='learner', log_every_n_steps=100))
 
   loop = acme.EnvironmentLoop(environment,
                               agent,
