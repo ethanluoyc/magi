@@ -198,6 +198,7 @@ class SACLearner(core.Learner):
                lr_alpha: float = 3e-4,
                init_alpha: float = 1.0,
                adam_b1_alpha: float = 0.9,
+               max_gradient_norm: float = 0.5,
                logger: Optional[loggers.Logger] = None,
                counter: Optional[counting.Counter] = None):
     self._rng = hk.PRNGSequence(key)
@@ -216,12 +217,18 @@ class SACLearner(core.Learner):
     self.critic = critic
     self.params_critic = self.params_critic_target = self.critic.init(
         next(self._rng), dummy_state, dummy_action)
-    opt_init, self.opt_critic = optax.adam(lr_critic)
+    opt_init, self.opt_critic = optax.chain(
+      optax.clip_by_global_norm(max_gradient_norm),
+      optax.adam(lr_critic)
+    )
     self.opt_state_critic = opt_init(self.params_critic)
     # Actor.
     self.actor = policy
     self.params_actor = self.actor.init(next(self._rng), dummy_state)
-    opt_init, self.opt_actor = optax.adam(lr_actor)
+    opt_init, self.opt_actor = optax.chain(
+      optax.clip_by_global_norm(max_gradient_norm),
+      optax.adam(lr_actor)
+    )
     self.opt_state_actor = opt_init(self.params_actor)
     # Entropy coefficient.
     self.target_entropy = heuristic_target_entropy(environment_spec.actions)
@@ -291,7 +298,13 @@ class SACLearner(core.Learner):
 
   def step(self):
     batch = next(self._iterator)
-    state, action, reward, discount, next_state = batch.data
+    transitions = batch.data
+    state = transitions.observation
+    next_state = transitions.next_observation
+    action = transitions.action
+    reward = transitions.reward
+    discount = transitions.discount
+
     # No PER for now
     weight = jnp.ones_like(reward)
     discount = discount * self._gamma
@@ -328,7 +341,8 @@ class SACLearner(core.Learner):
     results = {
         'loss_alpha': loss_alpha,
         'loss_actor': loss_actor,
-        'loss_critic': loss_critic
+        'loss_critic': loss_critic,
+        'alpha': jnp.exp(self.log_alpha)
     }
     self._logger.write(results)
     # Update target network.
@@ -393,7 +407,7 @@ class SACLearner(core.Learner):
       mean_log_pi: jnp.ndarray,
   ) -> jnp.ndarray:
     # TODO(yl): Investigate if it should be log_alpha or exp(log_alpha)
-    return -log_alpha * (self.target_entropy + mean_log_pi), None
+    return -jnp.exp(log_alpha) * (self.target_entropy + mean_log_pi), None
 
   def get_variables(self, names):
     del names
