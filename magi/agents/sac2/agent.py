@@ -434,7 +434,7 @@ class SACAgent(core.Actor):
                logger=None,
                counter=None):
     # self.rng = hk.PRNGSequence(seed)
-    learner_key, actor_key, random_key = jax.random.split(jax.random.PRNGKey(seed), 3)
+    learner_key, actor_key, actor_key2, random_key = jax.random.split(jax.random.PRNGKey(seed), 4)
     self._num_observations = 0
     self._start_steps = start_steps
 
@@ -477,6 +477,7 @@ class SACAgent(core.Actor):
 
     client = variable_utils.VariableClient(self._learner, '')
     self._actor = SACActor(policy.apply, actor_key, client, adder=adder)
+    self._eval_actor = SACActor(policy.apply, actor_key2, client)
     self._random_actor = RandomActor(environment_spec.actions, random_key, adder=adder)
 
   def select_action(self, observation):
