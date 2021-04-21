@@ -57,41 +57,41 @@ class Critic(hk.Module):
     return fn(x), fn(x)
 
 
-class DeltaOrthogonal(hk.initializers.Initializer):
-  """
-    Delta-orthogonal initializer.
-    """
+# class DeltaOrthogonal(hk.initializers.Initializer):
+#   """
+#     Delta-orthogonal initializer.
+#     """
 
-  def __init__(self, scale=1.0, axis=-1):
-    self.scale = scale
-    self.axis = axis
+#   def __init__(self, scale=1.0, axis=-1):
+#     self.scale = scale
+#     self.axis = axis
 
-  def __call__(self, shape: Sequence[int], dtype) -> jnp.ndarray:
-    if len(shape) not in [3, 4, 5]:
-      raise ValueError("Delta orthogonal initializer requires 3D, 4D or 5D shape.")
-    w_mat = jnp.zeros(shape, dtype=dtype)
-    w_orthogonal = hk.initializers.Orthogonal(self.scale, self.axis)(shape[-2:], dtype)
-    if len(shape) == 3:
-      k = shape[0]
-      return jax.ops.index_update(
-          w_mat,
-          jax.ops.index[(k - 1) // 2, ...],
-          w_orthogonal,
-      )
-    elif len(shape) == 4:
-      k1, k2 = shape[:2]
-      return jax.ops.index_update(
-          w_mat,
-          jax.ops.index[(k1 - 1) // 2, (k2 - 1) // 2, ...],
-          w_orthogonal,
-      )
-    else:
-      k1, k2, k3 = shape[:3]
-      return jax.ops.index_update(
-          w_mat,
-          jax.ops.index[(k1 - 1) // 2, (k2 - 1) // 2, (k3 - 1) // 2, ...],
-          w_orthogonal,
-      )
+#   def __call__(self, shape: Sequence[int], dtype) -> jnp.ndarray:
+#     if len(shape) not in [3, 4, 5]:
+#       raise ValueError("Delta orthogonal initializer requires 3D, 4D or 5D shape.")
+#     w_mat = jnp.zeros(shape, dtype=dtype)
+#     w_orthogonal = hk.initializers.Orthogonal(self.scale, self.axis)(shape[-2:], dtype)
+#     if len(shape) == 3:
+#       k = shape[0]
+#       return jax.ops.index_update(
+#           w_mat,
+#           jax.ops.index[(k - 1) // 2, ...],
+#           w_orthogonal,
+#       )
+#     elif len(shape) == 4:
+#       k1, k2 = shape[:2]
+#       return jax.ops.index_update(
+#           w_mat,
+#           jax.ops.index[(k1 - 1) // 2, (k2 - 1) // 2, ...],
+#           w_orthogonal,
+#       )
+#     else:
+#       k1, k2, k3 = shape[:3]
+#       return jax.ops.index_update(
+#           w_mat,
+#           jax.ops.index[(k1 - 1) // 2, (k2 - 1) // 2, (k3 - 1) // 2, ...],
+#           w_orthogonal,
+#       )
 
 
 class SACEncoder(hk.Module):
@@ -111,7 +111,8 @@ class SACEncoder(hk.Module):
     x = x.astype(jnp.float32) / 255.0
 
     # Apply CNN.
-    w_init = DeltaOrthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
+    # w_init = DeltaOrthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
+    w_init = None
     x = hk.Conv2D(self.num_filters,
                   kernel_shape=4,
                   stride=2,
@@ -126,7 +127,9 @@ class SACEncoder(hk.Module):
                     w_init=w_init)(x)
       x = nn.leaky_relu(x, self.negative_slope)
     x = hk.Flatten()(x)
-    fc = hk.Linear(self.feature_dim, w_init=hk.initializers.Orthogonal(scale=1.0))
+    # w_init = hk.initializers.Orthogonal(scale=1.0)
+    w_init = None
+    fc = hk.Linear(self.feature_dim, w_init=w_init)
     ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
     return jnp.tanh(ln(fc(x)))
 
@@ -147,13 +150,15 @@ class SACDecoder(hk.Module):
 
   def __call__(self, x):
     # Apply linear layer.
-    w_init = hk.initializers.Orthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
+    # w_init = hk.initializers.Orthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
+    w_init = None
     x = hk.Linear(self.last_conv_dim, w_init=w_init)(x)
     x = nn.leaky_relu(x, self.negative_slope).reshape(-1, self.map_size, self.map_size,
                                                       self.num_filters)
 
     # Apply Transposed CNN.
-    w_init = DeltaOrthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
+    # w_init = DeltaOrthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
+    w_init = None
     for _ in range(self.num_layers - 1):
       x = hk.Conv2DTranspose(self.num_filters,
                              kernel_shape=3,
@@ -163,7 +168,8 @@ class SACDecoder(hk.Module):
       x = nn.leaky_relu(x, self.negative_slope)
 
     # Apply output layer.
-    w_init = DeltaOrthogonal(scale=1.0)
+    # w_init = DeltaOrthogonal(scale=1.0)
+    w_init = None
     x = hk.Conv2DTranspose(self._num_channels,
                            kernel_shape=4,
                            stride=2,
