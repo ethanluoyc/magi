@@ -21,52 +21,7 @@ import tree
 tfp = tensorflow_probability.experimental.substrates.jax
 tfd = tfp.distributions
 tfb = tfp.bijectors
-
-
-class Encoder(hk.Module):
-
-  def __call__(self, observation):
-    torso = hk.Sequential([
-        hk.Conv2D(16, kernel_shape=3, stride=2),
-        jax.nn.relu,
-        hk.Conv2D(16, kernel_shape=3, stride=2),
-        jax.nn.relu,
-    ])
-    feature = torso(observation)
-    # print(feature.shape)
-    return hk.Flatten()(feature)
-
-
-class Decoder(hk.Module):
-
-  def __call__(self, feature):
-    return hk.Sequential([
-        lambda x: jnp.reshape(x, (-1, 8, 8, 16)),
-        hk.Conv2DTranspose(16, kernel_shape=3, stride=2),
-        jax.nn.relu,
-        hk.Conv2DTranspose(3, kernel_shape=3, stride=2),
-        jax.nn.relu,
-    ])(feature)
-
-
-class Policy(hk.Module):
-
-  def __init__(self, action_dim: int, name=None):
-    super().__init__(name=name)
-    self._action_dim = action_dim
-
-  def __call__(self, feature):
-    o = hk.Linear(self._action_dim)(feature)
-    return distributional.NormalTanhDistribution(self._action_dim)(o)
-
-
-class Critic(hk.Module):
-
-  def __call__(self, feature, action):
-    q1 = hk.Linear(1)
-    q2 = hk.Linear(1)
-    input_ = jnp.concatenate([feature, action], axis=-1)
-    return q1(input_).squeeze(-1), q2(input_).squeeze(-1)
+from magi.agents.sac_ae import networks
 
 
 class NetworkTest(absltest.TestCase):
@@ -74,16 +29,16 @@ class NetworkTest(absltest.TestCase):
   @hk.testing.transform_and_run
   def test_network(self):
     # Create a fake environment to test with.
-    encoder = Encoder()
+    encoder = networks.Encoder()
     batch_size = 1
     action_dim = 2
-    dummy_obs = jnp.zeros((batch_size, 32, 32, 3))
+    dummy_obs = jnp.zeros((batch_size, 64, 64, 3))
     dummy_action = jnp.zeros((batch_size, action_dim))
     features = encoder(dummy_obs)
-    decoder = Decoder()
+    decoder = networks.Decoder()
     self.assertEqual(decoder(features).shape, dummy_obs.shape)
-    policy = Policy(action_dim)
-    critic = Critic()
+    policy = networks.Policy(action_dim)
+    critic = networks.Critic()
     action = policy(features).sample(seed=jax.random.PRNGKey(0))
     q1, q2 = critic(features, dummy_action)
     self.assertEqual(action.shape, (batch_size, action_dim))
@@ -93,7 +48,7 @@ class NetworkTest(absltest.TestCase):
   def test_losses(self):
     batch_size = 1
     action_dim = 2
-    dummy_obs = jnp.zeros((batch_size, 32, 32, 3))
+    dummy_obs = jnp.zeros((batch_size, 64, 64, 3))
     dummy_action = jnp.zeros((batch_size, action_dim))
     dummy_rewards = jnp.zeros((batch_size,))
     dummy_discount = jnp.zeros((batch_size,))
@@ -103,7 +58,7 @@ class NetworkTest(absltest.TestCase):
     key = jax.random.PRNGKey(0)
 
     # Set up encoder
-    encoder = hk.without_apply_rng(hk.transform(lambda o: Encoder()(o)))
+    encoder = hk.without_apply_rng(hk.transform(lambda o: networks.Encoder()(o)))
     encoder_params = encoder.init(key, dummy_obs)
     encoder_opt = optax.adam(1e-3)
     encoder_opt_state = encoder_opt.init(encoder_params)
@@ -111,19 +66,19 @@ class NetworkTest(absltest.TestCase):
     dummy_features = encoder.apply(encoder_params, dummy_obs)
 
     # Set up decoder
-    decoder = hk.without_apply_rng(hk.transform(lambda f: Decoder()(f)))
+    decoder = hk.without_apply_rng(hk.transform(lambda f: networks.Decoder()(f)))
     decoder_params = decoder.init(key, dummy_features)
     decoder_opt = optax.adam(1e-3)
     decoder_opt_state = decoder_opt.init(decoder_params)
 
     # Set up policy
-    policy = hk.without_apply_rng(hk.transform(lambda f: Policy(action_dim)(f)))
+    policy = hk.without_apply_rng(hk.transform(lambda f: networks.Policy(action_dim)(f)))
     policy_params = policy.init(key, dummy_features)
     policy_opt = optax.adam(1e-3)
     policy_opt_state = policy_opt.init(policy_params)
 
     # Set up critic
-    critic = hk.without_apply_rng(hk.transform(lambda o, a: Critic()(o, a)))
+    critic = hk.without_apply_rng(hk.transform(lambda o, a: networks.Critic()(o, a)))
     critic_params = critic.init(key, dummy_features, dummy_action)
     critic_opt = optax.adam(1e-3)
     critic_opt_state = critic_opt.init(critic_params)
