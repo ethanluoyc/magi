@@ -40,7 +40,7 @@ class Policy(hk.Module):
     self._action_dim = action_dim
 
   def __call__(self, feature):
-    torso = hk.nets.MLP(output_sizes=[256, 256], activate_final=True)
+    torso = hk.nets.MLP(output_sizes=[512, 512], activate_final=True)
     feature = torso(feature)
     return distributional.NormalTanhDistribution(self._action_dim)(feature)
 
@@ -50,7 +50,7 @@ class Critic(hk.Module):
   def __call__(self, feature, action):
 
     def fn(x):
-      torso = hk.nets.MLP(output_sizes=[256, 256], activate_final=True)
+      torso = hk.nets.MLP(output_sizes=[512, 512], activate_final=True)
       return hk.Linear(1)(torso(x)).squeeze(-1)
 
     x = jnp.concatenate([feature, action], axis=-1)

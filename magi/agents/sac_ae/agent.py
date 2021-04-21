@@ -210,6 +210,7 @@ class SACAELearner(core.Learner):
                lr_decoder: float = 1e-3,
                decoder_update_freq: int = 1,
                decoder_lambda=1e-6,
+               ae_l2_cost: 1e-7,
                init_alpha: float = 0.1,
                adam_b1_alpha=0.5,
                logger: Optional[loggers.Logger] = None,
@@ -373,7 +374,8 @@ class SACAELearner(core.Learner):
         # add L2 penalty on latent representation
         # see https://arxiv.org/pdf/1903.12436.pdf
         latent_loss = 0.5 * jnp.mean(jnp.sum(jnp.square(h), axis=-1))
-        loss = rec_loss + decoder_lambda * latent_loss
+        l2_loss = 0.5 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_leaves(params))
+        loss = rec_loss + decoder_lambda * latent_loss + l2_loss * ae_l2_cost
         return loss, None
 
       (loss, aux), grad = jax.value_and_grad(_loss_fn, has_aux=True)(params_ae, obs)
@@ -497,6 +499,7 @@ class SACAEAgent(core.Actor):
                lr_decoder: float = 1e-3,
                decoder_update_freq: int = 1,
                decoder_lambda=1e-6,
+               ae_l2_cost=1e-7,
                init_alpha: float = 0.1,
                adam_b1_alpha=0.5,
                logger=None,
@@ -543,6 +546,7 @@ class SACAEAgent(core.Actor):
                                  encoder_tau=encoder_tau,
                                  lr_decoder=lr_decoder,
                                  decoder_lambda=decoder_lambda,
+                                 ae_l2_cost=ae_l2_cost,
                                  decoder_update_freq=decoder_update_freq,
                                  init_alpha=init_alpha,
                                  adam_b1_alpha=adam_b1_alpha,
