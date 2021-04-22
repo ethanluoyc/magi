@@ -193,6 +193,7 @@ class SACAELearner(core.Learner):
                environment_spec: specs.EnvironmentSpec,
                policy: hk.Transformed,
                critic: hk.Transformed,
+               linear: hk.Transformed,
                encoder: hk.Transformed,
                decoder: hk.Transformed,
                key: jax.random.PRNGKey,
@@ -237,21 +238,30 @@ class SACAELearner(core.Learner):
     encoder_opt = optax.adam(lr_encoder)
     # self.encoder_opt_state = encoder_opt.init(self.encoder_params)
 
-    dummy_features = encoder.apply(self.encoder_params, dummy_obs)
+    dummy_map = encoder.apply(self.encoder_params, dummy_obs)
+    actor_linear_params = linear.init(next(self._rng), dummy_map)
+    critic_linear_params = linear.init(next(self._rng), dummy_map)
+    dummy_embedding = linear.apply(actor_linear_params, dummy_map)
 
     # Set up decoder
-    self.decoder_params = decoder.init(next(self._rng), dummy_features)
+    self.decoder_params = decoder.init(next(self._rng), dummy_embedding)
     ae_opt = optax.adam(lr_decoder)
 
     self.ae_opt_state = ae_opt.init(self.decoder_params)
 
     # Set up policy
-    self.policy_params = policy.init(next(self._rng), dummy_features)
+    self.policy_params = {
+      'policy': policy.init(next(self._rng), dummy_embedding),
+      'linear': actor_linear_params,
+    }
     policy_opt = optax.adam(lr_actor)
     self.policy_opt_state = policy_opt.init(self.policy_params)
 
     # Set up critic
-    self.critic_params = critic.init(next(self._rng), dummy_features, dummy_action)
+    self.critic_params = {
+      'critic': critic.init(next(self._rng), dummy_embedding, dummy_action),
+      'linear': critic_linear_params,
+    }
     critic_opt = optax.adam(lr_critic)
     self.critic_opt_state = critic_opt.init(self.entire_critic_params)
 
@@ -277,12 +287,22 @@ class SACAELearner(core.Learner):
         next_action: jnp.ndarray,
         next_log_pi: jnp.ndarray,
     ) -> jnp.ndarray:
-      next_qs = jnp.stack(critic.apply(params_critic_target, next_state,
+      next_qs = jnp.stack(critic_forward(params_critic_target, next_state,
                                        next_action)).min(axis=0)
       next_q = next_qs - jnp.exp(log_alpha) * next_log_pi
       assert len(next_q.shape) == 1
       assert len(reward.shape) == 1
       return jax.lax.stop_gradient(reward + discount * next_q)
+
+    def critic_forward(params, encoded, action):
+      h = linear.apply(params['linear'], encoded)
+      return critic.apply(params['critic'], h, action)
+
+    def policy_forward(params, encoded):
+      h = linear.apply(params['linear'], encoded)
+      return policy.apply(params['policy'], h)
+
+    self.policy_forward = policy_forward
 
     def _loss_critic(params_entire_critic: hk.Params, params_entire_critic_target: hk.Params,
                      params_actor: hk.Params,
@@ -292,12 +312,13 @@ class SACAELearner(core.Learner):
                      key) -> Tuple[jnp.ndarray, jnp.ndarray]:
       encoded = encoder.apply(params_entire_critic['encoder'], state)
       next_encoded = encoder.apply(params_entire_critic['encoder'], next_state)
-      next_action_dist = policy.apply(params_actor, next_encoded)
+      # next_action_dist = policy.apply(params_actor, next_encoded)
+      next_action_dist = policy_forward(params_actor, next_encoded)
       next_action = next_action_dist.sample(seed=key)
       next_log_pi = next_action_dist.log_prob(next_action)
       target = _calculate_target(params_entire_critic_target['critic'], log_alpha, reward, discount,
                                  next_encoded, next_action, next_log_pi)
-      q_list = critic.apply(params_entire_critic['critic'], encoded, action)
+      q_list = critic_forward(params_entire_critic['critic'], encoded, action)
       abs_td = jnp.abs(target - q_list[0])
       loss = (jnp.square(abs_td) * weight).mean()
       for value in q_list[1:]:
@@ -309,11 +330,11 @@ class SACAELearner(core.Learner):
                     key) -> Tuple[jnp.ndarray, jnp.ndarray]:
       h = encoder.apply(params_critic['encoder'], state)
       h = jax.lax.stop_gradient(h)
-      action_dist = policy.apply(params_actor, h)
+      action_dist = policy_forward(params_actor, h)
       action = action_dist.sample(seed=key)
       log_pi = action_dist.log_prob(action)
 
-      mean_q = jnp.stack(critic.apply(params_critic['critic'], h, action)).min(axis=0).mean()
+      mean_q = jnp.stack(critic_forward(params_critic['critic'], h, action)).min(axis=0).mean()
       mean_log_pi = log_pi.mean()
       return jax.lax.stop_gradient(
           jnp.exp(log_alpha)) * mean_log_pi - mean_q, jax.lax.stop_gradient(mean_log_pi)
@@ -387,7 +408,9 @@ class SACAELearner(core.Learner):
     def _update_target(entire_critic_new, entire_critic_target):
       updated_encoder_target_p = optax.incremental_update(entire_critic_new['encoder'], entire_critic_target['encoder'], step_size=encoder_tau)
       updated_critic_target_p = optax.incremental_update(entire_critic_new['critic'], entire_critic_target['critic'], step_size=critic_tau)
-      return {'encoder': updated_encoder_target_p, 'critic': updated_critic_target_p}
+      return {
+        'encoder': updated_encoder_target_p, 'critic': updated_critic_target_p
+      }
 
     self._update_critic = jax.jit(_update_critic)
     self._update_actor = jax.jit(_update_actor)
@@ -483,6 +506,7 @@ class SACAEAgent(core.Actor):
                critic,
                encoder,
                decoder,
+               linear,
                seed,
                gamma=0.99,
                buffer_size=10**6,
@@ -531,6 +555,7 @@ class SACAEAgent(core.Actor):
     self._learner = SACAELearner(environment_spec,
                                  policy,
                                  critic,
+                                 linear,
                                  encoder,
                                  decoder,
                                  key=learner_key,
@@ -558,12 +583,12 @@ class SACAEAgent(core.Actor):
                                         discount=1.0)
 
     client = variable_utils.VariableClient(self._learner, '')
-    self._actor = SACAEActor(policy.apply,
+    self._actor = SACAEActor(self._learner.policy_forward,
                              encoder.apply,
                              actor_key,
                              client,
                              adder=adder)
-    self._eval_actor = SACAEActor(policy.apply, encoder.apply, actor_key2, client)
+    self._eval_actor = SACAEActor(self._learner.policy_forward, encoder.apply, actor_key2, client)
     self._random_actor = RandomActor(environment_spec.actions, random_key, adder=adder)
 
   def select_action(self, observation):

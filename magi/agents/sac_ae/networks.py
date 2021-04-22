@@ -126,13 +126,20 @@ class SACEncoder(hk.Module):
                     padding="VALID",
                     w_init=w_init)(x)
       x = nn.leaky_relu(x, self.negative_slope)
-    x = hk.Flatten()(x)
+    return x
+
+class SACLinear(hk.Module):
+  def __init__(self, feature_dim, name=None):
+    super().__init__(name=name)
+    self.feature_dim = feature_dim
+
+  def __call__(self, x):
     # w_init = hk.initializers.Orthogonal(scale=1.0)
+    x = hk.Flatten()(x)
     w_init = None
     fc = hk.Linear(self.feature_dim, w_init=w_init)
     ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
     return jnp.tanh(ln(fc(x)))
-
 
 class SACDecoder(hk.Module):
   """

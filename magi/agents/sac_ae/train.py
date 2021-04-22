@@ -56,10 +56,13 @@ def main(_):
   decoder = hk.without_apply_rng(
       hk.transform(lambda f: networks.SACDecoder(spec.observations['pixels'].shape[-1])
                    (f)))
+  linear = hk.without_apply_rng(
+      hk.transform(lambda f: networks.SACLinear(50)(f)))
 
   algo = SACAEAgent(environment_spec=spec,
                     policy=policy,
                     critic=critic,
+                    linear=linear,
                     encoder=encoder,
                     decoder=decoder,
                     seed=FLAGS.seed,
