@@ -21,66 +21,21 @@ tfp = tensorflow_probability.experimental.substrates.jax
 tfd = tfp.distributions
 tfb = tfp.bijectors
 
+
 @jax.jit
 def preprocess_state(
     state: np.ndarray,
     key: jnp.ndarray,
 ) -> jnp.ndarray:
-    """
+  """
     Preprocess pixel states to fit into [-0.5, 0.5].
     """
-    state = state.astype(jnp.float32)
-    state = jnp.floor(state / 8)
-    state = state / 32
-    state = state + jax.random.uniform(key, state.shape) / 32
-    state = state - 0.5
-    return state
-
-# TODO(yl): debug numerical issues with using tfp distributions instead of
-# manually handling tanh transformations
-# @jax.jit
-# def gaussian_log_prob(
-#     log_std: jnp.ndarray,
-#     noise: jnp.ndarray,
-# ) -> jnp.ndarray:
-#   """
-#     Calculate log probabilities of gaussian distributions.
-#     """
-#   return -0.5 * (jnp.square(noise) + 2 * log_std + jnp.log(2 * math.pi))
-
-# @jax.jit
-# def gaussian_and_tanh_log_prob(
-#     log_std: jnp.ndarray,
-#     noise: jnp.ndarray,
-#     action: jnp.ndarray,
-# ) -> jnp.ndarray:
-#   """
-#     Calculate log probabilities of gaussian distributions and tanh transformation.
-#     """
-#   return gaussian_log_prob(log_std,
-#                            noise) - jnp.log(nn.relu(1.0 - jnp.square(action)) + 1e-6)
-
-# @partial(jax.jit, static_argnums=2)
-# def reparameterize_gaussian_and_tanh(
-#     dist,
-#     key: jnp.ndarray,
-#     return_log_pi: bool = True,
-# ) -> Tuple[jnp.ndarray, jnp.ndarray]:
-#   """
-#     Sample from gaussian distributions and tanh transforamation.
-#     """
-#   # dist = _output_to_dist(mean, log_std)
-#   action = dist.sample(seed=key)
-#   if return_log_pi:
-#     return action, dist.log_prob(action)
-#   return action
-#   # std = jnp.exp(log_std)
-#   # noise = jax.random.normal(key, std.shape)
-#   # action = jnp.tanh(mean + noise * std)
-#   # if return_log_pi:
-#   #   return action, gaussian_and_tanh_log_prob(log_std, noise, action).sum(axis=1)
-#   # else:
-#   #   return action
+  state = state.astype(jnp.float32)
+  state = jnp.floor(state / 8)
+  state = state / 32
+  state = state + jax.random.uniform(key, state.shape) / 32
+  state = state - 0.5
+  return state
 
 
 def heuristic_target_entropy(action_spec):
@@ -115,6 +70,71 @@ class SACAEActor(core.Actor):
       # can handle both batched and unbatched inputs, consider lifing this assumption
       dist = forward_fn(params['policy'], h)
       action = dist.sample(seed=subkey)
+      return utils.squeeze_batch_dim(action), key
+
+    self._forward = forward
+    # Make sure not to use a random policy after checkpoint restoration by
+    # assigning variables before running the environment loop.
+    if self._variable_client is not None:
+      self._variable_client.update_and_wait()
+
+  def select_action(self, observation):
+    # Forward.
+    action, self._key = self._forward(self._params, self._key, observation)
+    action = utils.to_numpy(action)
+    return action
+
+  def observe_first(self, timestep: dm_env.TimeStep):
+    if self._adder is not None:
+      self._adder.add_first(timestep)
+
+  def observe(
+      self,
+      action,
+      next_timestep: dm_env.TimeStep,
+  ):
+    if self._adder is not None:
+      self._adder.add(action, next_timestep)
+
+  def update(self, wait: bool = True):  # not the default wait = False
+    if self._variable_client is not None:
+      self._variable_client.update(wait=wait)
+
+  @property
+  def _params(self) -> Optional[hk.Params]:
+    if self._variable_client is None:
+      # If self._variable_client is None then we assume self._forward  does not
+      # use the parameters it is passed and just return None.
+      return None
+    return self._variable_client.params
+
+
+class SACAEEvalActor(core.Actor):
+  """A SAC actor."""
+
+  def __init__(
+      self,
+      forward_fn,
+      encode_fn,
+      key,
+      variable_client,
+      adder=None,
+  ):
+
+    # Store these for later use.
+    self._adder = adder
+    self._variable_client = variable_client
+    self._key = key
+
+    @jax.jit
+    def forward(params, key, observation):
+      key, subkey = jax.random.split(key)
+      o = utils.add_batch_dim(observation)
+      h = encode_fn(params['encoder'], o)
+      # TODO(yl): Currently this assumes that the forward_fn
+      # can handle both batched and unbatched inputs, consider lifing this assumption
+      dist = forward_fn(params['policy'], h)
+      action = dist.mode()
       return utils.squeeze_batch_dim(action), key
 
     self._forward = forward
@@ -202,6 +222,96 @@ class RandomActor(core.Actor):
     pass
 
 
+def make_critic_loss(encoder_forward, policy_forward, critic_forward):
+
+  def _calculate_target(
+      params_critic_target: hk.Params,
+      log_alpha: jnp.ndarray,
+      reward: np.ndarray,
+      discount: np.ndarray,
+      next_state: np.ndarray,
+      next_action: jnp.ndarray,
+      next_log_pi: jnp.ndarray,
+  ) -> jnp.ndarray:
+    next_qs = jnp.stack(critic_forward(params_critic_target, next_state,
+                                       next_action)).min(axis=0)
+    next_q = next_qs - jnp.exp(log_alpha) * next_log_pi
+    assert len(next_q.shape) == 1
+    assert len(reward.shape) == 1
+    return jax.lax.stop_gradient(reward + discount * next_q)
+
+  def _loss_critic(params_entire_critic: hk.Params,
+                   params_entire_critic_target: hk.Params, params_actor: hk.Params,
+                   log_alpha: jnp.ndarray, state: np.ndarray, action: np.ndarray,
+                   reward: np.ndarray, discount: np.ndarray, next_state: np.ndarray,
+                   weight: np.ndarray or List[jnp.ndarray],
+                   key) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    encoded = encoder_forward(params_entire_critic['encoder'], state)
+    next_encoded = encoder_forward(params_entire_critic['encoder'], next_state)
+    # next_action_dist = policy.apply(params_actor, next_encoded)
+    next_action_dist = policy_forward(params_actor, next_encoded)
+    next_action = next_action_dist.sample(seed=key)
+    next_log_pi = next_action_dist.log_prob(next_action)
+    target = _calculate_target(params_entire_critic_target['critic'], log_alpha, reward,
+                               discount, next_encoded, next_action, next_log_pi)
+    q_list = critic_forward(params_entire_critic['critic'], encoded, action)
+    abs_td = jnp.abs(target - q_list[0])
+    loss = (jnp.square(abs_td) * weight).mean()
+    for value in q_list[1:]:
+      loss += (jnp.square(target - value) * weight).mean()
+    return loss, jax.lax.stop_gradient(abs_td)
+
+  return _loss_critic
+
+
+def make_actor_loss(encoder_forward, policy_forward, critic_forward):
+
+  def _loss_actor(params_actor: hk.Params, params_critic: hk.Params,
+                  log_alpha: jnp.ndarray, state: np.ndarray,
+                  key) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    h = encoder_forward(params_critic['encoder'], state)
+    h = jax.lax.stop_gradient(h)
+    action_dist = policy_forward(params_actor, h)
+    action = action_dist.sample(seed=key)
+    log_pi = action_dist.log_prob(action)
+
+    mean_q = jnp.stack(critic_forward(params_critic['critic'], h,
+                                      action)).min(axis=0).mean()
+    mean_log_pi = log_pi.mean()
+    return jax.lax.stop_gradient(
+        jnp.exp(log_alpha)) * mean_log_pi - mean_q, jax.lax.stop_gradient(mean_log_pi)
+
+  return _loss_actor
+
+
+def alpha_loss(log_alpha: jnp.ndarray, mean_log_pi: jnp.ndarray,
+               target_entropy) -> jnp.ndarray:
+  # TODO(yl): Investigate if it should be log_alpha or exp(log_alpha)
+  return -jnp.exp(log_alpha) * (target_entropy + mean_log_pi), None
+
+
+def make_autoencoding_loss(encoder_forward, linear_forward, decoder_forward, *,
+                           decoder_lambda, ae_l2_cost):
+
+  def _loss_fn(params, obs, key):
+    encoder_params, decoder_params, decoder_linear_params = params['encoder'], params[
+        'decoder'], params['linear']
+    h = encoder_forward(encoder_params, obs)
+    h = linear_forward(decoder_linear_params, h)
+    rec_obs = decoder_forward(decoder_params, h)
+    # TODO(yl): consider moving this out
+    target = preprocess_state(obs['pixels'], key)
+    rec_loss = jnp.mean(jnp.square(target - rec_obs))
+    # add L2 penalty on latent representation
+    # see https://arxiv.org/pdf/1903.12436.pdf
+    latent_loss = 0.5 * jnp.mean(jnp.sum(jnp.square(h), axis=-1))
+    l2_loss = 0.5 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_leaves(params))
+    loss = rec_loss + decoder_lambda * latent_loss + l2_loss * ae_l2_cost
+    return loss, None
+
+  return _loss_fn
+
+
 class SACAELearner(core.Learner):
 
   def __init__(self,
@@ -250,28 +360,24 @@ class SACAELearner(core.Learner):
 
     # Set up encoder
     self.encoder_params = encoder.init(next(self._rng), dummy_obs)
-    encoder_opt = optax.adam(lr_encoder)
-    # self.encoder_opt_state = encoder_opt.init(self.encoder_params)
 
     dummy_map = encoder.apply(self.encoder_params, dummy_obs)
     actor_linear_params = linear.init(next(self._rng), dummy_map)
     critic_linear_params = linear.init(next(self._rng), dummy_map)
     dummy_embedding = linear.apply(actor_linear_params, dummy_map)
 
-
-
     # Set up policy
     self.policy_params = {
-      'policy': policy.init(next(self._rng), dummy_embedding),
-      'linear': actor_linear_params,
+        'policy': policy.init(next(self._rng), dummy_embedding),
+        'linear': actor_linear_params,
     }
     policy_opt = optax.adam(lr_actor)
     self.policy_opt_state = policy_opt.init(self.policy_params)
 
     # Set up critic
     self.critic_params = {
-      'critic': critic.init(next(self._rng), dummy_embedding, dummy_action),
-      'linear': critic_linear_params,
+        'critic': critic.init(next(self._rng), dummy_embedding, dummy_action),
+        'linear': critic_linear_params,
     }
     critic_opt = optax.adam(lr_critic)
     self.critic_opt_state = critic_opt.init(self.entire_critic_params)
@@ -294,22 +400,6 @@ class SACAELearner(core.Learner):
     self.critic_encoder_target_params = tree.map_structure(lambda x: x.copy(),
                                                            self.encoder_params)
 
-    def _calculate_target(
-        params_critic_target: hk.Params,
-        log_alpha: jnp.ndarray,
-        reward: np.ndarray,
-        discount: np.ndarray,
-        next_state: np.ndarray,
-        next_action: jnp.ndarray,
-        next_log_pi: jnp.ndarray,
-    ) -> jnp.ndarray:
-      next_qs = jnp.stack(critic_forward(params_critic_target, next_state,
-                                       next_action)).min(axis=0)
-      next_q = next_qs - jnp.exp(log_alpha) * next_log_pi
-      assert len(next_q.shape) == 1
-      assert len(reward.shape) == 1
-      return jax.lax.stop_gradient(reward + discount * next_q)
-
     def critic_forward(params, encoded, action):
       h = linear.apply(params['linear'], encoded)
       return critic.apply(params['critic'], h, action)
@@ -320,52 +410,19 @@ class SACAELearner(core.Learner):
 
     self.policy_forward = policy_forward
 
-    def _loss_critic(params_entire_critic: hk.Params, params_entire_critic_target: hk.Params,
-                     params_actor: hk.Params,
-                     log_alpha: jnp.ndarray, state: np.ndarray, action: np.ndarray,
-                     reward: np.ndarray, discount: np.ndarray, next_state: np.ndarray,
-                     weight: np.ndarray or List[jnp.ndarray],
-                     key) -> Tuple[jnp.ndarray, jnp.ndarray]:
-      encoded = encoder.apply(params_entire_critic['encoder'], state)
-      next_encoded = encoder.apply(params_entire_critic['encoder'], next_state)
-      # next_action_dist = policy.apply(params_actor, next_encoded)
-      next_action_dist = policy_forward(params_actor, next_encoded)
-      next_action = next_action_dist.sample(seed=key)
-      next_log_pi = next_action_dist.log_prob(next_action)
-      target = _calculate_target(params_entire_critic_target['critic'], log_alpha, reward, discount,
-                                 next_encoded, next_action, next_log_pi)
-      q_list = critic_forward(params_entire_critic['critic'], encoded, action)
-      abs_td = jnp.abs(target - q_list[0])
-      loss = (jnp.square(abs_td) * weight).mean()
-      for value in q_list[1:]:
-        loss += (jnp.square(target - value) * weight).mean()
-      return loss, jax.lax.stop_gradient(abs_td)
+    actor_loss_fn = make_actor_loss(encoder.apply, policy_forward, critic_forward)
+    critic_loss_fn = make_critic_loss(encoder.apply, policy_forward, critic_forward)
+    alpha_loss_fn = partial(alpha_loss, target_entropy=target_entropy)
+    ae_loss_fn = make_autoencoding_loss(encoder.apply,
+                                        linear.apply,
+                                        decoder.apply,
+                                        decoder_lambda=decoder_lambda,
+                                        ae_l2_cost=ae_l2_cost)
 
-    def _loss_actor(params_actor: hk.Params, params_critic: hk.Params,
-                    log_alpha: jnp.ndarray, state: np.ndarray,
-                    key) -> Tuple[jnp.ndarray, jnp.ndarray]:
-      h = encoder.apply(params_critic['encoder'], state)
-      h = jax.lax.stop_gradient(h)
-      action_dist = policy_forward(params_actor, h)
-      action = action_dist.sample(seed=key)
-      log_pi = action_dist.log_prob(action)
-
-      mean_q = jnp.stack(critic_forward(params_critic['critic'], h, action)).min(axis=0).mean()
-      mean_log_pi = log_pi.mean()
-      return jax.lax.stop_gradient(
-          jnp.exp(log_alpha)) * mean_log_pi - mean_q, jax.lax.stop_gradient(mean_log_pi)
-
-    def _loss_alpha(log_alpha: jnp.ndarray, mean_log_pi: jnp.ndarray,
-                    target_entropy) -> jnp.ndarray:
-      # TODO(yl): Investigate if it should be log_alpha or exp(log_alpha)
-      return -jnp.exp(log_alpha) * (target_entropy + mean_log_pi), None
-
-    def _update_actor(params_actor, opt_state, key, params_critic,
-                      log_alpha, state):
-      (loss, aux), grad = jax.value_and_grad(_loss_actor,
-                                             has_aux=True)(params_actor,
-                                                           params_critic, log_alpha,
-                                                           state, key)
+    def _update_actor(params_actor, opt_state, key, params_critic, log_alpha, state):
+      (loss, aux), grad = jax.value_and_grad(actor_loss_fn,
+                                             has_aux=True)(params_actor, params_critic,
+                                                           log_alpha, state, key)
       update, opt_state = policy_opt.update(grad, opt_state)
       params_actor = optax.apply_updates(params_actor, update)
       return params_actor, opt_state, loss, aux
@@ -384,50 +441,40 @@ class SACAELearner(core.Learner):
         next_state,
         weight,
     ):
-      (loss, aux), grad = jax.value_and_grad(_loss_critic, has_aux=True)(
-          params_critic, params_critic_target, params_actor, log_alpha,
-          state, action, reward, discount, next_state, weight, key)
+      (loss,
+       aux), grad = jax.value_and_grad(critic_loss_fn,
+                                       has_aux=True)(params_critic,
+                                                     params_critic_target, params_actor,
+                                                     log_alpha, state, action, reward,
+                                                     discount, next_state, weight, key)
       update, opt_state = critic_opt.update(grad, opt_state)
       params_critic = optax.apply_updates(params_critic, update)
       return params_critic, opt_state, loss, aux
 
     def _update_alpha(log_alpha, opt_state, mean_log_pi):
-      (loss, aux), grad = jax.value_and_grad(_loss_alpha,
-                                             has_aux=True)(log_alpha, mean_log_pi,
-                                                           target_entropy)
+      (loss, aux), grad = jax.value_and_grad(alpha_loss_fn, has_aux=True)(log_alpha,
+                                                                          mean_log_pi)
       update, opt_state = log_alpha_opt.update(grad, opt_state)
       log_alpha = optax.apply_updates(log_alpha, update)
       return log_alpha, opt_state, loss, aux
 
     def _update_autoencoder(params_ae, opt_state, key, obs):
 
-      def _loss_fn(params, obs):
-        encoder_params, decoder_params, decoder_linear_params = params['encoder'], params['decoder'], params['linear']
-        h = encoder.apply(encoder_params, obs)
-        h = linear.apply(decoder_linear_params, h)
-        rec_obs = decoder.apply(decoder_params, h)
-        # TODO(yl): consider moving this out
-        target = preprocess_state(obs['pixels'], key)
-        rec_loss = jnp.mean(jnp.square(target - rec_obs))
-        # add L2 penalty on latent representation
-        # see https://arxiv.org/pdf/1903.12436.pdf
-        latent_loss = 0.5 * jnp.mean(jnp.sum(jnp.square(h), axis=-1))
-        l2_loss = 0.5 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_leaves(params))
-        loss = rec_loss + decoder_lambda * latent_loss + l2_loss * ae_l2_cost
-        return loss, None
-
-      (loss, aux), grad = jax.value_and_grad(_loss_fn, has_aux=True)(params_ae, obs)
-
-      update, opt_state = encoder_opt.update(grad, opt_state)
+      (loss, aux), grad = jax.value_and_grad(ae_loss_fn, has_aux=True)(params_ae, obs,
+                                                                       key)
+      update, opt_state = ae_opt.update(grad, opt_state)
       new_params_ae = optax.apply_updates(params_ae, update)
       return new_params_ae, opt_state, loss, aux
 
     def _update_target(entire_critic_new, entire_critic_target):
-      updated_encoder_target_p = optax.incremental_update(entire_critic_new['encoder'], entire_critic_target['encoder'], step_size=encoder_tau)
-      updated_critic_target_p = optax.incremental_update(entire_critic_new['critic'], entire_critic_target['critic'], step_size=critic_tau)
-      return {
-        'encoder': updated_encoder_target_p, 'critic': updated_critic_target_p
-      }
+      updated_encoder_target_p = optax.incremental_update(
+          entire_critic_new['encoder'],
+          entire_critic_target['encoder'],
+          step_size=encoder_tau)
+      updated_critic_target_p = optax.incremental_update(entire_critic_new['critic'],
+                                                         entire_critic_target['critic'],
+                                                         step_size=critic_tau)
+      return {'encoder': updated_encoder_target_p, 'critic': updated_critic_target_p}
 
     self._update_critic = jax.jit(_update_critic)
     self._update_actor = jax.jit(_update_actor)
@@ -475,8 +522,8 @@ class SACAELearner(core.Learner):
     # Update critic
     new_critic_params, self.critic_opt_state, loss_critic, _ = self._update_critic(
         self.entire_critic_params, self.critic_opt_state, next(self._rng),
-        self.entire_critic_target_params, self.policy_params,
-        self.log_alpha, state, action, reward, discount, next_state, weight)
+        self.entire_critic_target_params, self.policy_params, self.log_alpha, state,
+        action, reward, discount, next_state, weight)
     self.critic_params = new_critic_params['critic']
     self.encoder_params = new_critic_params['encoder']
     results['loss_critic'] = loss_critic
@@ -485,8 +532,7 @@ class SACAELearner(core.Learner):
     if self._step % self._actor_update_freq == 0:
       self.policy_params, self.policy_opt_state, loss_actor, mean_log_pi = self._update_actor(
           self.policy_params, self.policy_opt_state, next(self._rng),
-          self.entire_critic_target_params, self.log_alpha,
-          state)
+          self.entire_critic_params, self.log_alpha, state)
       results['loss_actor'] = loss_actor
 
       self.log_alpha, self.log_alpha_opt_state, loss_alpha, _, = self._update_alpha(
@@ -496,7 +542,8 @@ class SACAELearner(core.Learner):
 
     # Update target network.
     if self._step % self._critic_target_update_freq == 0:
-      new_target_params = self._update_target(self.entire_critic_params, self.entire_critic_target_params)
+      new_target_params = self._update_target(self.entire_critic_params,
+                                              self.entire_critic_target_params)
       self.critic_encoder_target_params = new_target_params['encoder']
       self.critic_target_params = new_target_params['critic']
 
@@ -607,7 +654,8 @@ class SACAEAgent(core.Actor):
                              actor_key,
                              client,
                              adder=adder)
-    self._eval_actor = SACAEActor(self._learner.policy_forward, encoder.apply, actor_key2, client)
+    self.eval_actor = SACAEEvalActor(self._learner.policy_forward, encoder.apply,
+                                      actor_key2, client)
     self._random_actor = RandomActor(environment_spec.actions, random_key, adder=adder)
 
   def select_action(self, observation):
