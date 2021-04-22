@@ -21,6 +21,21 @@ tfp = tensorflow_probability.experimental.substrates.jax
 tfd = tfp.distributions
 tfb = tfp.bijectors
 
+@jax.jit
+def preprocess_state(
+    state: np.ndarray,
+    key: jnp.ndarray,
+) -> jnp.ndarray:
+    """
+    Preprocess pixel states to fit into [-0.5, 0.5].
+    """
+    state = state.astype(jnp.float32)
+    state = jnp.floor(state / 8)
+    state = state / 32
+    state = state + jax.random.uniform(key, state.shape) / 32
+    state = state - 0.5
+    return state
+
 # TODO(yl): debug numerical issues with using tfp distributions instead of
 # manually handling tanh transformations
 # @jax.jit
@@ -243,11 +258,7 @@ class SACAELearner(core.Learner):
     critic_linear_params = linear.init(next(self._rng), dummy_map)
     dummy_embedding = linear.apply(actor_linear_params, dummy_map)
 
-    # Set up decoder
-    self.decoder_params = decoder.init(next(self._rng), dummy_embedding)
-    ae_opt = optax.adam(lr_decoder)
 
-    self.ae_opt_state = ae_opt.init(self.decoder_params)
 
     # Set up policy
     self.policy_params = {
@@ -264,6 +275,11 @@ class SACAELearner(core.Learner):
     }
     critic_opt = optax.adam(lr_critic)
     self.critic_opt_state = critic_opt.init(self.entire_critic_params)
+
+    # Set up decoder
+    self.decoder_params = decoder.init(next(self._rng), dummy_embedding)
+    ae_opt = optax.adam(lr_decoder)
+    self.ae_opt_state = ae_opt.init(self.ae_params)
 
     # Setup log alpha
     self.log_alpha = jnp.array(np.log(init_alpha), dtype=jnp.float32)
@@ -383,14 +399,15 @@ class SACAELearner(core.Learner):
       log_alpha = optax.apply_updates(log_alpha, update)
       return log_alpha, opt_state, loss, aux
 
-    def _update_autoencoder(params_ae, opt_state, obs):
+    def _update_autoencoder(params_ae, opt_state, key, obs):
 
       def _loss_fn(params, obs):
-        encoder_params, decoder_params = params['encoder'], params['decoder']
+        encoder_params, decoder_params, decoder_linear_params = params['encoder'], params['decoder'], params['linear']
         h = encoder.apply(encoder_params, obs)
+        h = linear.apply(decoder_linear_params, h)
         rec_obs = decoder.apply(decoder_params, h)
         # TODO(yl): consider moving this out
-        target = obs['pixels'].astype(jnp.float32) / 255.
+        target = preprocess_state(obs['pixels'], key)
         rec_loss = jnp.mean(jnp.square(target - rec_obs))
         # add L2 penalty on latent representation
         # see https://arxiv.org/pdf/1903.12436.pdf
@@ -423,6 +440,7 @@ class SACAELearner(core.Learner):
     return {
         "encoder": self.encoder_params,
         "decoder": self.decoder_params,
+        "linear": self.critic_params['linear']
     }
 
   @property
@@ -464,7 +482,7 @@ class SACAELearner(core.Learner):
     results['loss_critic'] = loss_critic
 
     # Update actor and alpha
-    if self._step % self._actor_update_freq:
+    if self._step % self._actor_update_freq == 0:
       self.policy_params, self.policy_opt_state, loss_actor, mean_log_pi = self._update_actor(
           self.policy_params, self.policy_opt_state, next(self._rng),
           self.entire_critic_target_params, self.log_alpha,
@@ -477,16 +495,17 @@ class SACAELearner(core.Learner):
       results['alpha'] = jnp.exp(self.log_alpha)
 
     # Update target network.
-    if self._step % self._critic_target_update_freq:
+    if self._step % self._critic_target_update_freq == 0:
       new_target_params = self._update_target(self.entire_critic_params, self.entire_critic_target_params)
       self.critic_encoder_target_params = new_target_params['encoder']
       self.critic_target_params = new_target_params['critic']
 
-    if self._step % self._decoder_update_freq:
+    if self._step % self._decoder_update_freq == 0:
       new_ae_params, self.ae_opt_state, loss_ae, _ = self._update_autoencoder(
-          self.ae_params, self.ae_opt_state, state)
+          self.ae_params, self.ae_opt_state, next(self._rng), state)
       self.encoder_params = new_ae_params['encoder']
       self.decoder_params = new_ae_params['decoder']
+      self.critic_params['linear'] = new_ae_params['linear']
       results['ae_loss'] = loss_ae
 
     self._step += 1

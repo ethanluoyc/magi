@@ -5,6 +5,41 @@ import jax.numpy as jnp
 from acme.jax.networks import distributional
 from jax import nn
 import numpy as np
+import tensorflow_probability
+
+hk_init = hk.initializers
+tfp = tensorflow_probability.experimental.substrates.jax
+tfd = tfp.distributions
+
+
+class MLP(hk.Module):
+
+  def __init__(
+      self,
+      output_dim,
+      hidden_units,
+      hidden_activation=nn.relu,
+      output_activation=None,
+      hidden_scale=1.0,
+      output_scale=1.0,
+  ):
+    super(MLP, self).__init__()
+    self.output_dim = output_dim
+    self.hidden_units = hidden_units
+    self.hidden_activation = hidden_activation
+    self.output_activation = output_activation
+    self.hidden_kwargs = {"w_init": hk.initializers.Orthogonal(scale=hidden_scale)}
+    self.output_kwargs = {"w_init": hk.initializers.Orthogonal(scale=output_scale)}
+
+  def __call__(self, x):
+    # x_input = x
+    for i, unit in enumerate(self.hidden_units):
+      x = hk.Linear(unit, **self.hidden_kwargs)(x)
+      x = self.hidden_activation(x)
+    x = hk.Linear(self.output_dim, **self.output_kwargs)(x)
+    if self.output_activation is not None:
+      x = self.output_activation(x)
+    return x
 
 
 class Encoder(hk.Module):
@@ -38,11 +73,22 @@ class Policy(hk.Module):
   def __init__(self, action_dim: int, name=None):
     super().__init__(name=name)
     self._action_dim = action_dim
+    self.log_std_min = -20
+    self.log_std_max = 2
 
-  def __call__(self, feature):
-    torso = hk.nets.MLP(output_sizes=[512, 512], activate_final=True)
-    feature = torso(feature)
-    return distributional.NormalTanhDistribution(self._action_dim)(feature)
+  def __call__(self, x):
+    x = MLP(
+        2 * self._action_dim,
+        [512, 512],
+        hidden_activation=nn.relu,
+    )(x)
+    mean, log_std = jnp.split(x, 2, axis=-1)
+    log_std = self.log_std_min + 0.5 * (self.log_std_max -
+                                        self.log_std_min) * (jnp.tanh(log_std) + 1.0)
+
+    distribution = tfd.Normal(mean, jnp.exp(log_std))
+    return tfd.Independent(distributional.TanhTransformedDistribution(distribution),
+                           reinterpreted_batch_ndims=1)
 
 
 class Critic(hk.Module):
@@ -50,48 +96,53 @@ class Critic(hk.Module):
   def __call__(self, feature, action):
 
     def fn(x):
-      torso = hk.nets.MLP(output_sizes=[512, 512], activate_final=True)
-      return hk.Linear(1)(torso(x)).squeeze(-1)
+      torso = MLP(
+          1,
+          [512, 512],
+          hidden_activation=nn.relu,
+          hidden_scale=np.sqrt(2),
+      )
+      return torso(x).squeeze(-1)
 
     x = jnp.concatenate([feature, action], axis=-1)
     return fn(x), fn(x)
 
 
-# class DeltaOrthogonal(hk.initializers.Initializer):
-#   """
-#     Delta-orthogonal initializer.
-#     """
+class DeltaOrthogonal(hk.initializers.Initializer):
+  """
+    Delta-orthogonal initializer.
+    """
 
-#   def __init__(self, scale=1.0, axis=-1):
-#     self.scale = scale
-#     self.axis = axis
+  def __init__(self, scale=1.0, axis=-1):
+    self.scale = scale
+    self.axis = axis
 
-#   def __call__(self, shape: Sequence[int], dtype) -> jnp.ndarray:
-#     if len(shape) not in [3, 4, 5]:
-#       raise ValueError("Delta orthogonal initializer requires 3D, 4D or 5D shape.")
-#     w_mat = jnp.zeros(shape, dtype=dtype)
-#     w_orthogonal = hk.initializers.Orthogonal(self.scale, self.axis)(shape[-2:], dtype)
-#     if len(shape) == 3:
-#       k = shape[0]
-#       return jax.ops.index_update(
-#           w_mat,
-#           jax.ops.index[(k - 1) // 2, ...],
-#           w_orthogonal,
-#       )
-#     elif len(shape) == 4:
-#       k1, k2 = shape[:2]
-#       return jax.ops.index_update(
-#           w_mat,
-#           jax.ops.index[(k1 - 1) // 2, (k2 - 1) // 2, ...],
-#           w_orthogonal,
-#       )
-#     else:
-#       k1, k2, k3 = shape[:3]
-#       return jax.ops.index_update(
-#           w_mat,
-#           jax.ops.index[(k1 - 1) // 2, (k2 - 1) // 2, (k3 - 1) // 2, ...],
-#           w_orthogonal,
-#       )
+  def __call__(self, shape: Sequence[int], dtype) -> jnp.ndarray:
+    if len(shape) not in [3, 4, 5]:
+      raise ValueError("Delta orthogonal initializer requires 3D, 4D or 5D shape.")
+    w_mat = jnp.zeros(shape, dtype=dtype)
+    w_orthogonal = hk.initializers.Orthogonal(self.scale, self.axis)(shape[-2:], dtype)
+    if len(shape) == 3:
+      k = shape[0]
+      return jax.ops.index_update(
+          w_mat,
+          jax.ops.index[(k - 1) // 2, ...],
+          w_orthogonal,
+      )
+    elif len(shape) == 4:
+      k1, k2 = shape[:2]
+      return jax.ops.index_update(
+          w_mat,
+          jax.ops.index[(k1 - 1) // 2, (k2 - 1) // 2, ...],
+          w_orthogonal,
+      )
+    else:
+      k1, k2, k3 = shape[:3]
+      return jax.ops.index_update(
+          w_mat,
+          jax.ops.index[(k1 - 1) // 2, (k2 - 1) // 2, (k3 - 1) // 2, ...],
+          w_orthogonal,
+      )
 
 
 class SACEncoder(hk.Module):
@@ -111,8 +162,7 @@ class SACEncoder(hk.Module):
     x = x.astype(jnp.float32) / 255.0
 
     # Apply CNN.
-    # w_init = DeltaOrthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
-    w_init = None
+    w_init = DeltaOrthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
     x = hk.Conv2D(self.num_filters,
                   kernel_shape=4,
                   stride=2,
@@ -128,18 +178,20 @@ class SACEncoder(hk.Module):
       x = nn.leaky_relu(x, self.negative_slope)
     return x
 
+
 class SACLinear(hk.Module):
+
   def __init__(self, feature_dim, name=None):
     super().__init__(name=name)
     self.feature_dim = feature_dim
 
   def __call__(self, x):
-    # w_init = hk.initializers.Orthogonal(scale=1.0)
+    w_init = hk.initializers.Orthogonal(scale=1.0)
     x = hk.Flatten()(x)
-    w_init = None
     fc = hk.Linear(self.feature_dim, w_init=w_init)
     ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
     return jnp.tanh(ln(fc(x)))
+
 
 class SACDecoder(hk.Module):
   """
@@ -157,15 +209,13 @@ class SACDecoder(hk.Module):
 
   def __call__(self, x):
     # Apply linear layer.
-    # w_init = hk.initializers.Orthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
-    w_init = None
+    w_init = hk.initializers.Orthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
     x = hk.Linear(self.last_conv_dim, w_init=w_init)(x)
     x = nn.leaky_relu(x, self.negative_slope).reshape(-1, self.map_size, self.map_size,
                                                       self.num_filters)
 
     # Apply Transposed CNN.
-    # w_init = DeltaOrthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
-    w_init = None
+    w_init = DeltaOrthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
     for _ in range(self.num_layers - 1):
       x = hk.Conv2DTranspose(self.num_filters,
                              kernel_shape=3,
@@ -175,8 +225,7 @@ class SACDecoder(hk.Module):
       x = nn.leaky_relu(x, self.negative_slope)
 
     # Apply output layer.
-    # w_init = DeltaOrthogonal(scale=1.0)
-    w_init = None
+    w_init = DeltaOrthogonal(scale=1.0)
     x = hk.Conv2DTranspose(self._num_channels,
                            kernel_shape=4,
                            stride=2,
