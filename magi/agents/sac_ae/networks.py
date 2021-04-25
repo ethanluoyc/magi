@@ -1,5 +1,6 @@
 from typing import Sequence
 import haiku as hk
+from haiku import initializers
 import jax
 import jax.numpy as jnp
 from acme.jax.networks import distributional
@@ -11,35 +12,39 @@ hk_init = hk.initializers
 tfp = tensorflow_probability.experimental.substrates.jax
 tfd = tfp.distributions
 
+# uniform_initializer = hk.initializers.VarianceScaling(
+#     distribution='uniform', mode='fan_out', scale=0.333)
+uniform_initializer = hk_init.UniformScaling(scale=0.333)
+glorot_uniform_initializer = hk_init.VarianceScaling(1.0, "fan_avg", "uniform")
 
-class MLP(hk.Module):
+# class MLP(hk.Module):
 
-  def __init__(
-      self,
-      output_dim,
-      hidden_units,
-      hidden_activation=nn.relu,
-      output_activation=None,
-      hidden_scale=1.0,
-      output_scale=1.0,
-  ):
-    super(MLP, self).__init__()
-    self.output_dim = output_dim
-    self.hidden_units = hidden_units
-    self.hidden_activation = hidden_activation
-    self.output_activation = output_activation
-    self.hidden_kwargs = {"w_init": hk.initializers.Orthogonal(scale=hidden_scale)}
-    self.output_kwargs = {"w_init": hk.initializers.Orthogonal(scale=output_scale)}
+#   def __init__(
+#       self,
+#       output_dim,
+#       hidden_units,
+#       hidden_activation=nn.relu,
+#       output_activation=None,
+#       hidden_scale=1.0,
+#       output_scale=1.0,
+#   ):
+#     super(MLP, self).__init__()
+#     self.output_dim = output_dim
+#     self.hidden_units = hidden_units
+#     self.hidden_activation = hidden_activation
+#     self.output_activation = output_activation
+#     self.hidden_kwargs = {"w_init": hk.initializers.Orthogonal(scale=hidden_scale)}
+#     self.output_kwargs = {"w_init": hk.initializers.Orthogonal(scale=output_scale)}
 
-  def __call__(self, x):
-    # x_input = x
-    for i, unit in enumerate(self.hidden_units):
-      x = hk.Linear(unit, **self.hidden_kwargs)(x)
-      x = self.hidden_activation(x)
-    x = hk.Linear(self.output_dim, **self.output_kwargs)(x)
-    if self.output_activation is not None:
-      x = self.output_activation(x)
-    return x
+#   def __call__(self, x):
+#     # x_input = x
+#     for i, unit in enumerate(self.hidden_units):
+#       x = hk.Linear(unit, **self.hidden_kwargs)(x)
+#       x = self.hidden_activation(x)
+#     x = hk.Linear(self.output_dim, **self.output_kwargs)(x)
+#     if self.output_activation is not None:
+#       x = self.output_activation(x)
+#     return x
 
 
 class Encoder(hk.Module):
@@ -77,18 +82,18 @@ class Policy(hk.Module):
     self.log_std_max = 2
 
   def __call__(self, x):
-    x = MLP(
-        2 * self._action_dim,
-        [512, 512],
-        hidden_activation=nn.relu,
+    x = hk.nets.MLP([512, 512],
+      w_init=uniform_initializer,
+      activation=nn.elu, activate_final=True
     )(x)
-    mean, log_std = jnp.split(x, 2, axis=-1)
-    log_std = self.log_std_min + 0.5 * (self.log_std_max -
-                                        self.log_std_min) * (jnp.tanh(log_std) + 1.0)
+    return distributional.NormalTanhDistribution(self._action_dim)(x)
+    # mean, log_std = jnp.split(x, 2, axis=-1)
+    # log_std = self.log_std_min + 0.5 * (self.log_std_max -
+    #                                     self.log_std_min) * (jnp.tanh(log_std) + 1.0)
 
-    distribution = tfd.Normal(mean, jnp.exp(log_std))
-    return tfd.Independent(distributional.TanhTransformedDistribution(distribution),
-                           reinterpreted_batch_ndims=1)
+    # distribution = tfd.Normal(mean, jnp.exp(log_std))
+    # return tfd.Independent(distributional.TanhTransformedDistribution(distribution),
+    #                        reinterpreted_batch_ndims=1)
 
 
 class Critic(hk.Module):
@@ -96,13 +101,12 @@ class Critic(hk.Module):
   def __call__(self, feature, action):
 
     def fn(x):
-      torso = MLP(
-          1,
-          [512, 512],
-          hidden_activation=nn.relu,
-          hidden_scale=np.sqrt(2),
+      torso = hk.nets.MLP([512, 512],
+        w_init=uniform_initializer,
+        activation=nn.elu, activate_final=True
       )
-      return torso(x).squeeze(-1)
+      linear = hk.Linear(1)
+      return linear(torso(x)).squeeze(-1)
 
     x = jnp.concatenate([feature, action], axis=-1)
     return fn(x), fn(x)
@@ -162,20 +166,18 @@ class SACEncoder(hk.Module):
     x = x.astype(jnp.float32) / 255.0
 
     # Apply CNN.
-    w_init = DeltaOrthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
+    # w_init = DeltaOrthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
     x = hk.Conv2D(self.num_filters,
                   kernel_shape=4,
                   stride=2,
-                  padding="VALID",
-                  w_init=w_init)(x)
-    x = nn.leaky_relu(x, self.negative_slope)
+                  padding="VALID", w_init=glorot_uniform_initializer)(x)
+    x = nn.elu(x)
     for _ in range(self.num_layers - 1):
       x = hk.Conv2D(self.num_filters,
                     kernel_shape=3,
                     stride=1,
-                    padding="VALID",
-                    w_init=w_init)(x)
-      x = nn.leaky_relu(x, self.negative_slope)
+                    padding="VALID", w_init=glorot_uniform_initializer)(x)
+      x = nn.elu(x)
     return x
 
 
@@ -186,9 +188,9 @@ class SACLinear(hk.Module):
     self.feature_dim = feature_dim
 
   def __call__(self, x):
-    w_init = hk.initializers.Orthogonal(scale=1.0)
+    # w_init = hk.initializers.Orthogonal(scale=1.0)
     x = hk.Flatten()(x)
-    fc = hk.Linear(self.feature_dim, w_init=w_init)
+    fc = hk.Linear(self.feature_dim, w_init=uniform_initializer)
     ln = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)
     return jnp.tanh(ln(fc(x)))
 
@@ -209,26 +211,24 @@ class SACDecoder(hk.Module):
 
   def __call__(self, x):
     # Apply linear layer.
-    w_init = hk.initializers.Orthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
-    x = hk.Linear(self.last_conv_dim, w_init=w_init)(x)
-    x = nn.leaky_relu(x, self.negative_slope).reshape(-1, self.map_size, self.map_size,
+    # w_init = hk.initializers.Orthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
+    x = hk.Linear(self.last_conv_dim, w_init=uniform_initializer)(x)
+    x = nn.elu(x).reshape(-1, self.map_size, self.map_size,
                                                       self.num_filters)
 
     # Apply Transposed CNN.
-    w_init = DeltaOrthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
+    # w_init = DeltaOrthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
     for _ in range(self.num_layers - 1):
       x = hk.Conv2DTranspose(self.num_filters,
                              kernel_shape=3,
                              stride=1,
-                             padding="VALID",
-                             w_init=w_init)(x)
-      x = nn.leaky_relu(x, self.negative_slope)
+                             padding="VALID", w_init=glorot_uniform_initializer)(x)
+      x = nn.elu(x)
 
     # Apply output layer.
-    w_init = DeltaOrthogonal(scale=1.0)
+    # w_init = DeltaOrthogonal(scale=1.0)
     x = hk.Conv2DTranspose(self._num_channels,
                            kernel_shape=4,
                            stride=2,
-                           padding="VALID",
-                           w_init=w_init)(x)
+                           padding="VALID", w_init=glorot_uniform_initializer)(x)
     return x
