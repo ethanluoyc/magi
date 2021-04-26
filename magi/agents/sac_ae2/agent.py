@@ -106,49 +106,6 @@ def weight_decay(params: hk.Params) -> jnp.ndarray:
   return 0.5 * sum(jnp.vdot(x, x) for x in leaves)
 
 
-@jax.jit
-def gaussian_log_prob(
-    log_std: jnp.ndarray,
-    noise: jnp.ndarray,
-) -> jnp.ndarray:
-  """
-    Calculate log probabilities of gaussian distributions.
-    """
-  return -0.5 * (jnp.square(noise) + 2 * log_std + jnp.log(2 * math.pi))
-
-
-@jax.jit
-def gaussian_and_tanh_log_prob(
-    log_std: jnp.ndarray,
-    noise: jnp.ndarray,
-    action: jnp.ndarray,
-) -> jnp.ndarray:
-  """
-    Calculate log probabilities of gaussian distributions and tanh transformation.
-    """
-  return gaussian_log_prob(log_std,
-                           noise) - jnp.log(nn.relu(1.0 - jnp.square(action)) + 1e-6)
-
-
-@partial(jax.jit, static_argnums=3)
-def reparameterize_gaussian_and_tanh(
-    mean: jnp.ndarray,
-    log_std: jnp.ndarray,
-    key: jnp.ndarray,
-    return_log_pi: bool = True,
-) -> Tuple[jnp.ndarray, jnp.ndarray]:
-  """
-    Sample from gaussian distributions and tanh transforamation.
-    """
-  std = jnp.exp(log_std)
-  noise = jax.random.normal(key, std.shape)
-  action = jnp.tanh(mean + noise * std)
-  if return_log_pi:
-    return action, gaussian_and_tanh_log_prob(log_std, noise, action).sum(axis=-1)
-  else:
-    return action
-
-
 @partial(jax.jit, static_argnums=(0, 1, 4))
 def optimize(
     fn_loss: Any,
@@ -192,6 +149,7 @@ def _calculate_log_pi(
     action: np.ndarray,
     log_pi: np.ndarray,
 ) -> jnp.ndarray:
+  del action
   return log_pi
 
 
@@ -207,16 +165,6 @@ def _calculate_loss_critic_and_abs_td(
   return loss_critic, jax.lax.stop_gradient(abs_td)
 
 
-def _sample_action(
-    actor_apply,
-    params_actor: hk.Params,
-    state: np.ndarray,
-    key: jnp.ndarray,
-) -> Tuple[jnp.ndarray, jnp.ndarray]:
-  mean, log_std = actor_apply(params_actor, state)
-  return reparameterize_gaussian_and_tanh(mean, log_std, key, True)
-
-
 # Loss functions
 def make_critic_loss_fn(encoder_apply, actor_apply, linear_apply, critic_apply, gamma):
 
@@ -229,8 +177,7 @@ def make_critic_loss_fn(encoder_apply, actor_apply, linear_apply, critic_apply, 
     last_conv = encoder_apply(params_critic["encoder"], state)
     next_last_conv = jax.lax.stop_gradient(
         encoder_apply(params_critic["encoder"], next_state))
-    next_action, next_log_pi = _sample_action(actor_apply, params_actor, next_last_conv,
-                                              key)
+    next_action, next_log_pi = actor_apply(params_actor, next_last_conv).sample_and_log_prob(key)
     target = _calculate_target(linear_apply, critic_apply, params_critic_target,
                                log_alpha, reward, discount, next_last_conv, next_action,
                                next_log_pi, gamma)
@@ -284,7 +231,7 @@ def make_actor_loss_fn(encoder_apply, actor_apply, linear_apply, critic_apply):
                   log_alpha: jnp.ndarray, state: np.ndarray,
                   key) -> Tuple[jnp.ndarray, jnp.ndarray]:
     last_conv = jax.lax.stop_gradient(encoder_apply(params_critic["encoder"], state))
-    action, log_pi = _sample_action(actor_apply, params_actor, last_conv, key)
+    action, log_pi = actor_apply(params_actor, last_conv).sample_and_log_prob(key)
     mean_q = _calculate_value(linear_apply, critic_apply, params_critic, last_conv,
                               action).mean()
     mean_log_pi = _calculate_log_pi(action, log_pi).mean()
@@ -346,9 +293,9 @@ class SACAEActor(core.Actor):
       key, subkey = jax.random.split(key)
       o = utils.add_batch_dim(observation)
       last_conv = encode_fn(params['encoder'], o)
-      mean, log_std = forward_fn(params['actor'], last_conv)
+      return forward_fn(params['actor'], last_conv).sample(subkey)[0], key
       # TODO(yl): Currently this assumes that the forward_fn
-      return reparameterize_gaussian_and_tanh(mean, log_std, subkey, False)[0], key
+      # return reparameterize_gaussian_and_tanh(mean, log_std, subkey, False)[0], key
 
     self._forward = forward
     # Make sure not to use a random policy after checkpoint restoration by
@@ -409,8 +356,7 @@ class SACAEEvalActor(core.Actor):
       key, subkey = jax.random.split(key)
       o = utils.add_batch_dim(observation)
       last_conv = encode_fn(params['encoder'], o)
-      mean, _ = forward_fn(params['actor'], last_conv)
-      return jnp.tanh(mean)[0], key
+      return forward_fn(params['actor'], last_conv).mode()[0], key
 
     self._forward = forward
     # Make sure not to use a random policy after checkpoint restoration by
