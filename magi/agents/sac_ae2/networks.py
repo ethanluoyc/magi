@@ -191,9 +191,9 @@ class SACDecoder(hk.Module):
     Decoder for SAC+AE.
     """
 
-    def __init__(self, state_space, num_layers=4, num_filters=32, negative_slope=0.1):
+    def __init__(self, state_shape, num_layers=4, num_filters=32, negative_slope=0.1):
         super().__init__()
-        self.state_space = state_space
+        self.state_shape = state_shape
         self.num_layers = num_layers
         self.num_filters = num_filters
         self.negative_slope = negative_slope
@@ -214,7 +214,7 @@ class SACDecoder(hk.Module):
 
         # Apply output layer.
         w_init = DeltaOrthogonal(scale=1.0)
-        x = hk.Conv2DTranspose(self.state_space.shape[2], kernel_shape=4, stride=2, padding="VALID", w_init=w_init)(x)
+        x = hk.Conv2DTranspose(self.state_shape.shape[2], kernel_shape=4, stride=2, padding="VALID", w_init=w_init)(x)
         return x
 
 
