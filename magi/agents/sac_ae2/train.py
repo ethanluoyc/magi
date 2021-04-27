@@ -6,8 +6,9 @@ from absl import app, flags
 from acme import specs, wrappers
 from acme.wrappers import gym_wrapper
 from magi.agents.jax.sac import loggers
-from magi.agents.sac_ae2.agent import SAC_AE
-# from magi.agents.sac_ae.wrappers import ConcatFrameWrapper
+from magi.agents import sac_ae2
+from magi.agents.sac_ae2 import networks
+from magi.agents.sac_ae2.environment import make_dmc_env
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string('domain_name', 'cheetah', 'dm_control domain')
@@ -36,12 +37,13 @@ flags.DEFINE_integer('seed', 0, 'Random seed.')
 #   env = wrappers.SinglePrecisionWrapper(env)
 #   return env
 
+
 def load_env(domain_name, task_name, seed, frame_stack, action_repeat):
-  del frame_stack
-  from magi.agents.sac_ae2.environment import make_dmc_env
-  env = make_dmc_env(domain_name, task_name, action_repeat)
+  # TODO(yl): Remove make_dmc_env and construct environment from dm_control directly.
+  env = make_dmc_env(domain_name, task_name, action_repeat, n_frames=frame_stack, image_size=84)
   env.seed(seed)
   return wrappers.SinglePrecisionWrapper(gym_wrapper.GymWrapper(env))
+
 
 def main(_):
   np.random.seed(FLAGS.seed)
@@ -50,14 +52,23 @@ def main(_):
     wandb.init(
         project=FLAGS.wandb_project,
         entity=FLAGS.wandb_entity,
-        name=f"sac_ae-{FLAGS.domain_name}-{FLAGS.task_name}_{FLAGS.seed}_{int(time.time())}",
+        name=
+        f"sac_ae-{FLAGS.domain_name}-{FLAGS.task_name}_{FLAGS.seed}_{int(time.time())}",
         config=FLAGS)
-  env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed, FLAGS.frame_stack, FLAGS.action_repeat)
-  test_env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed + 1000, FLAGS.frame_stack, FLAGS.action_repeat)
+  env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed, FLAGS.frame_stack,
+                 FLAGS.action_repeat)
+  test_env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed + 1000,
+                      FLAGS.frame_stack, FLAGS.action_repeat)
   spec = specs.make_environment_spec(env)
-  print(spec)
+  network_spec = networks.make_default_networks(spec)
 
-  agent = SAC_AE(environment_spec=spec, seed=FLAGS.seed)
+  agent = sac_ae2.SACAEAgent(environment_spec=spec,
+                     networks=network_spec,
+                     seed=FLAGS.seed,
+                     logger=loggers.make_logger(label='learner',
+                                                time_delta=60,
+                                                use_wandb=FLAGS.wandb))
+  eval_actor = agent.make_actor(is_eval=True)
 
   loop = acme.EnvironmentLoop(env,
                               agent,
@@ -65,13 +76,13 @@ def main(_):
                                                          time_delta=5.,
                                                          use_wandb=FLAGS.wandb))
   eval_loop = acme.EnvironmentLoop(test_env,
-                                   agent.eval_actor,
+                                   eval_actor,
                                    logger=loggers.make_logger(label='eval',
                                                               time_delta=0,
                                                               use_wandb=FLAGS.wandb))
   for _ in range(FLAGS.num_steps // FLAGS.eval_freq):
     loop.run(num_steps=FLAGS.eval_freq)
-    agent.eval_actor.update(wait=True)
+    eval_actor.update(wait=True)
     eval_loop.run(num_episodes=FLAGS.eval_episodes)
 
   if FLAGS.wandb:

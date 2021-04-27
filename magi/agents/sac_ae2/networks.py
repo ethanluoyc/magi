@@ -394,3 +394,54 @@ def reparameterize_gaussian_and_tanh(
     return action, gaussian_and_tanh_log_prob(log_std, noise, action).sum(axis=-1)
   else:
     return action
+
+
+def make_default_networks(
+    environment_spec,
+    num_critics: int = 2,
+    critic_hidden_sizes: Sequence[int] = (1024, 1024),
+    actor_hidden_sizes: Sequence[int] = (1024, 1024),
+    latent_size: int = 50,
+    log_std_min: float = -10.,
+    log_std_max: float = 2.,
+    num_filters: int = 32,
+    num_layers: int = 4,
+):
+
+  def critic(x, a):
+    # Define without linear layer.
+    return ContinuousQFunction(
+        num_critics=num_critics,
+        hidden_units=critic_hidden_sizes,
+    )(x, a)
+
+  def actor(x):
+    # Define with linear layer.
+    x = SACLinear(feature_dim=latent_size)(x)
+    return StateDependentGaussianPolicy(
+        action_size=environment_spec.actions.shape[0],
+        hidden_units=actor_hidden_sizes,
+        log_std_min=log_std_min,
+        log_std_max=log_std_max,
+        clip_log_std=False,
+    )(x)
+
+  def encoder(x):
+    return SACEncoder(num_filters=num_filters, num_layers=num_layers)(x)
+
+  def linear(x):
+    return SACLinear(feature_dim=latent_size)(x)
+
+  def decoder(x):
+    return SACDecoder(environment_spec.observations,
+                      num_filters=num_filters,
+                      num_layers=num_layers)(x)
+
+  # Encoder.
+  return {
+      'encoder': encoder,
+      'decoder': decoder,
+      'critic': critic,
+      'actor': actor,
+      'linear': linear
+  }
