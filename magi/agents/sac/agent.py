@@ -1,10 +1,11 @@
 """Soft Actor-Critic implementation"""
 from functools import partial
-from typing import Iterator, List, Optional, Tuple
+from typing import Iterator, List, Optional, Sequence, Tuple
 
 from acme.adders import reverb as adders
 from acme import core
 from acme import datasets
+from acme.jax import networks as network_lib
 from acme.jax import utils
 from acme.jax import variable_utils
 from acme import specs
@@ -18,11 +19,9 @@ import numpy as np
 import optax
 import reverb
 from reverb import rate_limiters
-import tensorflow_probability
 
-tfp = tensorflow_probability.experimental.substrates.jax
-tfd = tfp.distributions
-tfb = tfp.bijectors
+from magi.agents import actors
+from magi.agents.sac import acting as acting_lib
 
 # TODO(yl): debug numerical issues with using tfp distributions instead of
 # manually handling tanh transformations
@@ -76,118 +75,19 @@ def heuristic_target_entropy(action_spec):
   return -float(np.prod(action_spec.shape))
 
 
-# TODO(yl): The actors are probably redundant, consider using the generic actor in Acme.
-class SACActor(core.Actor):
-  """A SAC actor."""
+def make_apply_sample_fn(forward_fn, is_eval=True):
 
-  def __init__(
-      self,
-      forward_fn,
-      key,
-      variable_client,
-      adder=None,
-  ):
+  def fn(params, key, observation):
+    dist = forward_fn(params, observation)
+    if is_eval:
+      return dist.mode()
+    else:
+      return dist.sample(key)
 
-    # Store these for later use.
-    self._adder = adder
-    self._variable_client = variable_client
-    self._key = key
-
-    @jax.jit
-    def forward(params, key, observation):
-      key, subkey = jax.random.split(key)
-      # TODO(yl): Currently this assumes that the forward_fn
-      # can handle both batched and unbatched inputs, consider lifing this assumption
-      dist = forward_fn(params, observation)
-      action = dist.sample(seed=subkey)
-      return action, key
-
-    self._forward = forward
-    # Make sure not to use a random policy after checkpoint restoration by
-    # assigning variables before running the environment loop.
-    if self._variable_client is not None:
-      self._variable_client.update_and_wait()
-
-  def select_action(self, observation):
-    # Forward.
-    action, self._key = self._forward(self._params, self._key, observation)
-    action = utils.to_numpy(action)
-    return action
-
-  def observe_first(self, timestep: dm_env.TimeStep):
-    if self._adder is not None:
-      self._adder.add_first(timestep)
-
-  def observe(
-      self,
-      action,
-      next_timestep: dm_env.TimeStep,
-  ):
-    if self._adder is not None:
-      self._adder.add(action, next_timestep)
-
-  def update(self, wait: bool = True):  # not the default wait = False
-    if self._variable_client is not None:
-      self._variable_client.update(wait=wait)
-
-  @property
-  def _params(self) -> Optional[hk.Params]:
-    if self._variable_client is None:
-      # If self._variable_client is None then we assume self._forward  does not
-      # use the parameters it is passed and just return None.
-      return None
-    return self._variable_client.params
+  return fn
 
 
-class RandomActor(core.Actor):
-  """An actor that samples random actions."""
-
-  def __init__(
-      self,
-      action_spec,
-      key,
-      adder=None,
-  ):
-    # Store these for later use.
-    self._adder = adder
-    self._key = key
-    self._action_spec = action_spec
-
-    @partial(jax.jit, backend='cpu')
-    def forward(key, observation):
-      del observation
-      key, subkey = jax.random.split(key)
-      action_dist = tfd.Uniform(low=jnp.broadcast_to(self._action_spec.minimum,
-                                                     self._action_spec.shape),
-                                high=jnp.broadcast_to(self._action_spec.maximum,
-                                                      self._action_spec.shape))
-      action = action_dist.sample(seed=subkey)
-      return action, key
-
-    self._forward_fn = forward
-
-  def select_action(self, observation):
-    # Forward.
-    action, self._key = self._forward_fn(self._key, observation)
-    return utils.to_numpy(action)
-
-  def observe_first(self, timestep: dm_env.TimeStep):
-    if self._adder is not None:
-      self._adder.add_first(timestep)
-
-  def observe(
-      self,
-      action,
-      next_timestep: dm_env.TimeStep,
-  ):
-    if self._adder is not None:
-      self._adder.add(action, next_timestep)
-
-  def update(self, wait: bool = False):
-    pass
-
-
-class SACLearner(core.Learner):
+class SACLearner(core.Learner, core.VariableSource):
 
   def __init__(self,
                environment_spec: specs.EnvironmentSpec,
@@ -477,17 +377,26 @@ class SACAgent(core.Actor):
                                         discount=1.0)
 
     client = variable_utils.VariableClient(self._learner, '')
-    self._actor = SACActor(policy.apply, actor_key, client, adder=adder)
-    self._eval_actor = SACActor(policy.apply, actor_key2, client)
-    self._random_actor = RandomActor(environment_spec.actions, random_key, adder=adder)
+    self._actor = acting_lib.SACActor(policy.apply,
+                                      actor_key,
+                                      is_eval=False,
+                                      variable_client=client,
+                                      adder=adder)
+    self._eval_actor = acting_lib.SACActor(policy.apply,
+                                           actor_key2,
+                                           is_eval=False,
+                                           variable_client=client)
+    self._random_actor = actors.RandomActor(environment_spec.actions,
+                                            random_key,
+                                            adder=adder)
 
-  def select_action(self, observation):
+  def select_action(self, observation: network_lib.Observation) -> network_lib.Action:
     return self._get_active_actor().select_action(observation)
 
   def observe_first(self, timestep: dm_env.TimeStep):
     return self._get_active_actor().observe_first(timestep)
 
-  def observe(self, action, next_timestep: dm_env.TimeStep):
+  def observe(self, action: network_lib.Action, next_timestep: dm_env.TimeStep):
     self._num_observations += 1
     self._get_active_actor().observe(action, next_timestep)
 
@@ -503,5 +412,5 @@ class SACAgent(core.Actor):
     self._learner.step()
     self._actor.update(wait=True)
 
-  def get_variables(self, names):
+  def get_variables(self, names: Sequence[str]):
     return [self._learner.get_variables(names)]

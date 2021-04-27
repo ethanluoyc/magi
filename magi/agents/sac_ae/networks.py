@@ -321,10 +321,10 @@ class GaussianTanhTransformedHead:
   mean: jnp.ndarray
   log_std: jnp.ndarray
 
-  def sample(self, key):
+  def sample(self, seed):
     return reparameterize_gaussian_and_tanh(self.mean,
                                             self.log_std,
-                                            key,
+                                            seed,
                                             return_log_pi=False)
 
   def sample_and_log_prob(self, key):

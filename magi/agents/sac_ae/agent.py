@@ -21,6 +21,9 @@ import reverb
 from reverb import rate_limiters
 import tensorflow_probability
 
+from magi.agents import actors
+from magi.agents.sac import acting
+
 tfp = tensorflow_probability.experimental.substrates.jax
 tfd = tfp.distributions
 tfb = tfp.bijectors
@@ -230,118 +233,6 @@ def _loss_alpha(log_alpha: jnp.ndarray, mean_log_pi: jnp.ndarray,
   return -log_alpha * (target_entropy + mean_log_pi), None
 
 
-class SACAEActor(core.Actor):
-  """A SAC actor."""
-
-  def __init__(
-      self,
-      forward_fn,
-      encode_fn,
-      key,
-      is_eval=False,
-      variable_client=None,
-      adder=None,
-  ):
-
-    # Store these for later use.
-    self._adder = adder
-    self._variable_client = variable_client
-    self._key = key
-
-    @jax.jit
-    def forward(params, key, observation):
-      key, subkey = jax.random.split(key)
-      o = utils.add_batch_dim(observation)
-      last_conv = encode_fn(params['encoder'], o)
-      if not is_eval:
-        return forward_fn(params['actor'], last_conv).sample(subkey)[0], key
-      return forward_fn(params['actor'], last_conv).mode()[0], key
-
-    self._forward = forward
-    # Make sure not to use a random policy after checkpoint restoration by
-    # assigning variables before running the environment loop.
-    if self._variable_client is not None:
-      self._variable_client.update_and_wait()
-
-  def select_action(self, observation):
-    # Forward.
-    action, self._key = self._forward(self._params, self._key, observation)
-    action = utils.to_numpy(action)
-    return action
-
-  def observe_first(self, timestep: dm_env.TimeStep):
-    if self._adder is not None:
-      self._adder.add_first(timestep)
-
-  def observe(
-      self,
-      action,
-      next_timestep: dm_env.TimeStep,
-  ):
-    if self._adder is not None:
-      self._adder.add(action, next_timestep)
-
-  def update(self, wait: bool = True):  # not the default wait = False
-    if self._variable_client is not None:
-      self._variable_client.update(wait=wait)
-
-  @property
-  def _params(self) -> Optional[hk.Params]:
-    if self._variable_client is None:
-      # If self._variable_client is None then we assume self._forward  does not
-      # use the parameters it is passed and just return None.
-      return None
-    return self._variable_client.params
-
-
-class RandomActor(core.Actor):
-  """An actor that samples random actions."""
-
-  def __init__(
-      self,
-      action_spec: specs.BoundedArray,
-      key,
-      adder=None,
-  ):
-    # Store these for later use.
-    self._adder = adder
-    self._key = key
-    self._action_spec = action_spec
-
-    @partial(jax.jit, backend='cpu')
-    def forward(key, observation):
-      del observation
-      key, subkey = jax.random.split(key)
-      action_dist = tfd.Uniform(low=jnp.broadcast_to(self._action_spec.minimum,
-                                                     self._action_spec.shape),
-                                high=jnp.broadcast_to(self._action_spec.maximum,
-                                                      self._action_spec.shape))
-      action = action_dist.sample(seed=subkey)
-      return action, key
-
-    self._forward_fn = forward
-
-  def select_action(self, observation):
-    # Forward.
-    action, self._key = self._forward_fn(self._key, observation)
-    return utils.to_numpy(action)
-
-  def observe_first(self, timestep: dm_env.TimeStep):
-    if self._adder is not None:
-      self._adder.add_first(timestep)
-
-  def observe(
-      self,
-      action,
-      next_timestep: dm_env.TimeStep,
-  ):
-    if self._adder is not None:
-      self._adder.add(action, next_timestep)
-
-  def update(self, wait: bool = False):
-    pass
-
-
 @dataclasses.dataclass
 class SACAEConfig:
   """Configuration parameters for SAC-AE.
@@ -385,7 +276,7 @@ class SACAEConfig:
   lambda_weight: float = 1e-7
 
 
-class SACAEAgent:
+class SACAEAgent(core.Actor, core.VariableSource):
 
   def __init__(self,
                environment_spec: specs.EnvironmentSpec,
@@ -499,15 +390,21 @@ class SACAEAgent:
     adder = adders.NStepTransitionAdder(client=reverb.Client(address),
                                         n_step=1,
                                         discount=1.0)
-    self._policy_actor = SACAEActor(self._actor.apply,
-                                    self._encoder.apply,
-                                    next(self._rng),
-                                    is_eval=False,
-                                    variable_client=self._client,
-                                    adder=adder)
-    self._random_actor = RandomActor(environment_spec.actions,
-                                     next(self._rng),
-                                     adder=adder)
+
+    def forward_fn(params, observation):
+      feature_map = self._encoder.apply(params['encoder'], observation)
+      return self._actor.apply(params['actor'], feature_map)
+
+    self._forward_fn = forward_fn
+
+    self._policy_actor = acting.SACActor(self._forward_fn,
+                                         next(self._rng),
+                                         is_eval=False,
+                                         variable_client=self._client,
+                                         adder=adder)
+    self._random_actor = actors.RandomActor(environment_spec.actions,
+                                            next(self._rng),
+                                            adder=adder)
     # Set up actor for running evaluation loop
 
   def select_action(self, observation):
@@ -653,8 +550,7 @@ class SACAEAgent:
     return [{'encoder': self._encoder_params, 'actor': self._actor_params}]
 
   def make_actor(self, is_eval=True):
-    return SACAEActor(self._actor.apply,
-                      self._encoder.apply,
-                      next(self._rng),
-                      is_eval=is_eval,
-                      variable_client=self._client)
+    return acting.SACActor(self._forward_fn,
+                           next(self._rng),
+                           is_eval=is_eval,
+                           variable_client=self._client)
