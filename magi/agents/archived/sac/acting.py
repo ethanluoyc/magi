@@ -1,16 +1,18 @@
 from typing import Optional
-import haiku as hk
-import jax.numpy as jnp
-from acme import core
-import dm_env
-import numpy as np
-import jax
 
+from acme import core
+from acme.jax import utils
+import dm_env
+import haiku as hk
+import jax
+import jax.numpy as jnp
+import numpy as np
 import tensorflow_probability
 
 tfp = tensorflow_probability.experimental.substrates.jax
 tfd = tfp.distributions
 tfb = tfp.bijectors
+
 
 class SACActor(core.Actor):
   """A SAC actor."""
@@ -20,7 +22,7 @@ class SACActor(core.Actor):
       forward_fn,
       rng,
       variable_client,
-      adder = None,
+      adder=None,
   ):
 
     # Store these for later use.
@@ -31,16 +33,13 @@ class SACActor(core.Actor):
     @jax.jit
     def forward(params, key, observation):
       key, subkey = jax.random.split(key)
+      observation = utils.add_batch_dim(observation)
       mean, logstd = forward_fn(params, observation)
-      action_base_dist = tfd.Normal(
-          loc=mean,
-          scale=jnp.exp(logstd)
-      )
-      action_dist = tfd.TransformedDistribution(
-          action_base_dist, tfb.Tanh()
-      )
+      action_base_dist = tfd.Normal(loc=mean, scale=jnp.exp(logstd))
+      action_dist = tfd.Independent(
+          tfd.TransformedDistribution(action_base_dist, tfb.Tanh()))
       action = action_dist.sample(seed=subkey)
-      return action, key
+      return utils.squeeze_batch_dim(action), key
 
     self._forward = forward
     # Make sure not to use a random policy after checkpoint restoration by
@@ -66,7 +65,7 @@ class SACActor(core.Actor):
     if self._adder is not None:
       self._adder.add(action, next_timestep)
 
-  def update(self, wait: bool = True): # not the default wait = False
+  def update(self, wait: bool = True):  # not the default wait = False
     if self._variable_client is not None:
       self._variable_client.update_and_wait()
 
@@ -86,7 +85,7 @@ class RandomActor(core.Actor):
       self,
       action_spec,
       rng,
-      adder = None,
+      adder=None,
   ):
 
     # Store these for later use.
@@ -100,11 +99,12 @@ class RandomActor(core.Actor):
     if self._variable_client is not None:
       self._variable_client.update_and_wait()
 
-
   def select_action(self, observation):
     # Forward.
-    del observation
-    action_dist = tfd.Uniform(low=self._action_spec.minimum, high=self._action_spec.maximum)
+    action_dist = tfd.Uniform(low=jnp.broadcast_to(self._action_spec.minimum,
+                                                   self._action_spec.shape),
+                              high=jnp.broadcast_to(self._action_spec.maximum,
+                                                    self._action_spec.shape))
     action = action_dist.sample(seed=next(self._rng))
     action = np.array(action)
     return action
@@ -121,7 +121,7 @@ class RandomActor(core.Actor):
     if self._adder is not None:
       self._adder.add(action, next_timestep)
 
-  def update(self, wait: bool = True): # not the default wait = False
+  def update(self, wait: bool = True):  # not the default wait = False
     if self._variable_client is not None:
       self._variable_client.update(wait)
 
@@ -132,4 +132,3 @@ class RandomActor(core.Actor):
       # use the parameters it is passed and just return None.
       return None
     return self._variable_client.params
-

@@ -8,7 +8,9 @@
 [MASTER]
 
 # Files or directories to be skipped. They should be base names, not paths.
-ignore=third_party
+ignore=third_party,
+       experimental,
+       archived,
 
 # Files or directories matching the regex patterns are skipped. The regex
 # matches against base names, not paths.
@@ -146,6 +148,8 @@ disable=abstract-method,
         wrong-import-order,
         xrange-builtin,
         zip-builtin-not-iterating,
+        missing-docstring, # TODO(yl): reenable these over time.
+        unnecessary-lambda,
 
 
 [REPORTS]
@@ -265,7 +269,7 @@ generated-members=
 [FORMAT]
 
 # Maximum number of characters on a single line.
-max-line-length=80
+max-line-length=88
 
 # TODO(https://github.com/PyCQA/pylint/issues/3352): Direct pylint to exempt
 # lines made too long by directives to pytype.

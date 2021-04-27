@@ -1,13 +1,13 @@
 """Tests for soft actor critic."""
-import acme
-import haiku as hk
-import jax
 from absl.testing import absltest
+import acme
 from acme import specs
 from acme.testing import fakes
-from magi.agents.sac2 import networks
-from magi.agents.sac2.agent import SACAgent
 from acme.utils import loggers
+import haiku as hk
+
+from magi.agents.sac.agent import SACAgent
+from magi.agents.sac import networks
 
 
 def policy_fn(action_spec):
@@ -33,7 +33,8 @@ class SACTest(absltest.TestCase):
     # Create a fake environment to test with.
     environment = fakes.ContinuousEnvironment(action_dim=2,
                                               observation_dim=3,
-                                              episode_length=10, bounded=True)
+                                              episode_length=10,
+                                              bounded=True)
     spec = specs.make_environment_spec(environment)
     print(spec)
 

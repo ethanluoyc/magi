@@ -1,23 +1,20 @@
 """Running SAC on cartpole."""
+from absl import app
 import acme
+from acme import specs
+from acme import wrappers
+from dm_control import suite
 import haiku as hk
 import jax
-import jax.numpy as jnp
-import numpy as np
-from absl import app
-from acme import specs
-from magi.agents.jax import sac
-from magi.agents.jax.sac import acting
-from dm_control import suite
-from acme import specs
-from magi.agents.jax.sac.networks import (ContinuousQFunction,
-                                          StateDependentGaussianPolicy)
-from magi.agents.jax.sac import loggers
-from acme import wrappers
 import wandb
 
+from magi.agents.archived import sac
+from magi.utils import loggers
+from magi.agents.archived.sac.networks import ContinuousQFunction
+from magi.agents.archived.sac.networks import StateDependentGaussianPolicy
 
 _HIDDEN_UNITS = (256, 256)
+
 
 def policy_fn(action_spec):
 
@@ -43,13 +40,11 @@ def critic_fn():
 
 
 def main(_):
-  wandb.init(entity='ethanluoyc',
-             project='magi',
-             group='sac',
-             name='cartpole_swingup')
+  wandb.init(entity='ethanluoyc', project='magi', group='sac', name='cartpole_swingup')
   environment = suite.load("cartpole",
                            "swingup",
-                           environment_kwargs={"flat_observation": True}, task_kwargs={'random': 0})
+                           environment_kwargs={"flat_observation": True},
+                           task_kwargs={'random': 0})
   environment = wrappers.CanonicalSpecWrapper(environment)
   environment = wrappers.SinglePrecisionWrapper(environment)
   spec = specs.make_environment_spec(environment)
@@ -63,7 +58,8 @@ def main(_):
                        policy_network=policy,
                        critic_network=critic,
                        key=jax.random.PRNGKey(0),
-                       logger=loggers.WandbLogger(label='learner', log_every_n_steps=100))
+                       logger=loggers.WandbLogger(label='learner',
+                                                  log_every_n_steps=100))
 
   loop = acme.EnvironmentLoop(environment,
                               agent,

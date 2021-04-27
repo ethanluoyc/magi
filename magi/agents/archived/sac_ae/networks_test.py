@@ -1,27 +1,20 @@
 """Tests for soft actor critic."""
-from typing import Iterator, Tuple, List
-import haiku as hk
-import jax
+from typing import List, Tuple
+
 from absl.testing import absltest
-import jax.numpy as jnp
-import dm_env
 import haiku as hk
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-import reverb
 import tensorflow_probability
-from acme import core, datasets, specs
-from acme.utils import loggers, counting
-from acme.adders import reverb as adders
-from acme.jax.networks import distributional
 import tree
+
+from magi.agents.archived.sac_ae import networks
 
 tfp = tensorflow_probability.experimental.substrates.jax
 tfd = tfp.distributions
 tfb = tfp.bijectors
-from magi.agents.sac_ae import networks
 
 
 class NetworkTest(absltest.TestCase):
@@ -72,7 +65,8 @@ class NetworkTest(absltest.TestCase):
     decoder_opt_state = decoder_opt.init(decoder_params)
 
     # Set up policy
-    policy = hk.without_apply_rng(hk.transform(lambda f: networks.Policy(action_dim)(f)))
+    policy = hk.without_apply_rng(
+        hk.transform(lambda f: networks.Policy(action_dim)(f)))
     policy_params = policy.init(key, dummy_features)
     policy_opt = optax.adam(1e-3)
     policy_opt_state = policy_opt.init(policy_params)

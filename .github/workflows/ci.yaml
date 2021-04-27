@@ -17,6 +17,7 @@ jobs:
     - name: Install dependencies
       run: |
         pip install --upgrade pip setuptools wheel
+        pip install -r requirements.txt
         pip install .
         pip install .[test]
         pip install .[dev]

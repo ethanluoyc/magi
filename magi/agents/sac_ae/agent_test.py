@@ -1,14 +1,13 @@
-"""Tests for soft actor critic."""
-import acme
-import haiku as hk
-import jax
+"""Tests for running SAC-AE agent."""
 from absl.testing import absltest
+import acme
 from acme import specs
-from acme.testing import fakes
-from magi.agents.sac_ae import fakes
-from magi.agents.sac_ae import networks
-from magi.agents.sac_ae.agent import SACAEAgent
 from acme.utils import loggers
+
+from magi.utils import fakes
+from magi.agents.sac_ae.agent import SACAEAgent
+from magi.agents.sac_ae.agent import SACAEConfig
+from magi.agents.sac_ae import networks
 
 
 class SACTest(absltest.TestCase):
@@ -16,32 +15,17 @@ class SACTest(absltest.TestCase):
   def test_sac_ae(self):
     # Create a fake environment to test with.
     environment = fakes.ContinuousVisualEnvironment(action_dim=2,
-                                                    observation_shape=(32, 32, 3),
+                                                    observation_shape=(84, 84, 3),
                                                     episode_length=10,
                                                     bounded=True)
     spec = specs.make_environment_spec(environment)
-
-    # Make network purely functional
-    policy = hk.without_apply_rng(
-        hk.transform(lambda f: networks.Policy(spec.actions.shape[0])(f),
-                     apply_rng=True))
-    critic = hk.without_apply_rng(
-        hk.transform(lambda o, a: networks.Critic()(o, a), apply_rng=True))
-    encoder = hk.without_apply_rng(hk.transform(lambda o: networks.Encoder()(o)))
-    decoder = hk.without_apply_rng(hk.transform(lambda f: networks.Decoder()(f)))
-
     # Construct the agent.
+    network_spec = networks.make_default_networks(spec)
     agent = SACAEAgent(environment_spec=spec,
-                       policy=policy,
-                       critic=critic,
-                       encoder=encoder,
-                       decoder=decoder,
+                       networks=network_spec,
                        seed=0,
-                       start_steps=10,
-                       batch_size=1)
+                       config=SACAEConfig(initial_num_steps=10, batch_size=2))
 
-    # Try running the environment loop. We have no assertions here because all
-    # we care about is that the agent runs without raising any errors.
     loop = acme.EnvironmentLoop(environment,
                                 agent,
                                 logger=loggers.make_default_logger(label='environment',

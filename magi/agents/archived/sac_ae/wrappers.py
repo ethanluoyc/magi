@@ -7,6 +7,7 @@ from dm_env import specs as dm_env_specs
 import numpy as np
 import tree
 
+
 class ConcatFrameWrapper(base.EnvironmentWrapper):
   """Wrapper that stacks observations along a new final axis."""
 
@@ -19,8 +20,8 @@ class ConcatFrameWrapper(base.EnvironmentWrapper):
     """
     self._environment = environment
     original_spec = self._environment.observation_spec()
-    self._observation_spec = tree.map_structure(
-        lambda spec: self._update_spec(spec), original_spec)
+    self._observation_spec = tree.map_structure(lambda spec: self._update_spec(spec),
+                                                original_spec)
 
   def _process_timestep(self, timestep: dm_env.TimeStep) -> dm_env.TimeStep:
     observation = tree.map_structure(lambda x: x.reshape(x.shape[:-2] + (-1,)),

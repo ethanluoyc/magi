@@ -1,13 +1,14 @@
 """Tests for soft actor critic."""
-import acme
-import haiku as hk
-import jax
 from absl.testing import absltest
+import acme
 from acme import specs
 from acme.testing import fakes
-from magi.agents.jax import sac
-from magi.agents.jax.sac.networks import (ContinuousQFunction,
-                                          StateDependentGaussianPolicy)
+import haiku as hk
+import jax
+
+from magi.agents.archived import sac
+from magi.agents.archived.sac.networks import ContinuousQFunction
+from magi.agents.archived.sac.networks import StateDependentGaussianPolicy
 
 
 def policy_fn(action_spec):
@@ -21,8 +22,10 @@ def policy_fn(action_spec):
 def critic_fn():
 
   def fn(x, a):
-    critic = ContinuousQFunction()
-    return critic(x, a)
+    q1 = ContinuousQFunction(name="q1")(x, a)
+    q2 = ContinuousQFunction(name='q2')(x, a)
+    return q1, q2
+
   return fn
 
 
@@ -32,7 +35,8 @@ class SACTest(absltest.TestCase):
     # Create a fake environment to test with.
     environment = fakes.ContinuousEnvironment(action_dim=2,
                                               observation_dim=3,
-                                              episode_length=10)
+                                              episode_length=10,
+                                              bounded=True)
     spec = specs.make_environment_spec(environment)
 
     # Make network purely functional
@@ -47,8 +51,12 @@ class SACTest(absltest.TestCase):
 
     # Try running the environment loop. We have no assertions here because all
     from acme.utils import loggers
+
     # we care about is that the agent runs without raising any errors.
-    loop = acme.EnvironmentLoop(environment, agent, logger=loggers.make_default_logger(label='environment', save_data=False))
+    loop = acme.EnvironmentLoop(environment,
+                                agent,
+                                logger=loggers.make_default_logger(label='environment',
+                                                                   save_data=False))
     loop.run(num_episodes=200)
 
 

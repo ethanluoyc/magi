@@ -1,7 +1,10 @@
 """Logging for RL experiments."""
-import wandb
-from acme.utils.loggers import base, terminal, aggregators, filters
+from acme.utils.loggers import aggregators
 from acme.utils.loggers import asynchronous as async_logger
+from acme.utils.loggers import base
+from acme.utils.loggers import filters
+from acme.utils.loggers import terminal
+import wandb
 
 
 class WandbLogger(base.Logger):

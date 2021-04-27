@@ -1,18 +1,20 @@
-from typing import Sequence
-import acme
-import numpy as np
-from acme.utils import counting
-from absl import app, flags
-from acme import specs
-from magi.agents.sac2.agent import SACAgent
-from magi.agents.jax.sac import loggers
-import haiku as hk
 import time
+
+from absl import app
+from absl import flags
+import acme
 from acme.jax.networks import distributional
+from acme import specs
+from acme.utils import counting
 from acme.wrappers import gym_wrapper
-from magi.experimental.environments import bullet_kuka_env
-import jax.numpy as jnp
+import haiku as hk
 import jax
+import jax.numpy as jnp
+import numpy as np
+
+from magi.utils import loggers
+from magi.agents.sac.agent import SACAgent
+from magi.experimental.environments import bullet_kuka_env
 
 FLAGS = flags.FLAGS
 flags.DEFINE_bool('wandb', False, 'whether to log result to wandb')
@@ -97,6 +99,7 @@ def load_env(seed):
   env = gym_wrapper.GymWrapper(env)
   return env
 
+
 def evaluate(actor, env, num_episodes=200):
   actor.update(wait=True)
   episode_lengths = []
@@ -123,6 +126,7 @@ def evaluate(actor, env, num_episodes=200):
       "eval_average_episode_length": np.mean(episode_lengths),
       "eval_average_episode_return": np.mean(episode_returns),
   }
+
 
 def main(_):
   np.random.seed(FLAGS.seed)
@@ -159,7 +163,8 @@ def main(_):
                               algo,
                               logger=loggers.make_logger(label='environment_loop',
                                                          time_delta=5.,
-                                                         use_wandb=FLAGS.wandb), counter=counter)
+                                                         use_wandb=FLAGS.wandb),
+                              counter=counter)
   eval_logger = loggers.make_logger(label='evaluation',
                                     time_delta=0,
                                     use_wandb=FLAGS.wandb)

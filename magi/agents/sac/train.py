@@ -1,13 +1,17 @@
-import acme
-import numpy as np
-from absl import app, flags
-from acme import specs, wrappers
-from dm_control import suite
-from magi.agents.sac2 import networks
-from magi.agents.sac2.agent import SACAgent
-from magi.agents.jax.sac import loggers
-import haiku as hk
 import time
+
+from absl import app
+from absl import flags
+import acme
+from acme import specs
+from acme import wrappers
+from dm_control import suite
+import haiku as hk
+import numpy as np
+
+from magi.utils import loggers
+from magi.agents.sac.agent import SACAgent
+from magi.agents.sac import networks
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string('domain_name', 'cartpole', 'dm_control domain')
@@ -22,7 +26,7 @@ flags.DEFINE_integer('seed', 0, 'Random seed.')
 def load_env(domain_name, task_name, seed):
   env = suite.load(domain_name=domain_name,
                    task_name=task_name,
-                   environment_kwargs={"flat_observation": True},
+                   environment_kwargs={'flat_observation': True},
                    task_kwargs={'random': seed})
   env = wrappers.CanonicalSpecWrapper(env)
   env = wrappers.SinglePrecisionWrapper(env)
@@ -32,11 +36,11 @@ def load_env(domain_name, task_name, seed):
 def main(_):
   np.random.seed(FLAGS.seed)
   if FLAGS.wandb:
-    import wandb
+    import wandb  # pylint: disable=import-outside-toplevel
     wandb.init(
         project=FLAGS.wandb_project,
         entity=FLAGS.wandb_entity,
-        name=f"{FLAGS.domain_name}-{FLAGS.task_name}_{FLAGS.seed}_{int(time.time())}",
+        name=f'{FLAGS.domain_name}-{FLAGS.task_name}_{FLAGS.seed}_{int(time.time())}',
         config=FLAGS)
   env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed)
   spec = specs.make_environment_spec(env)
@@ -71,5 +75,5 @@ def main(_):
     wandb.finish()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
   app.run(main)

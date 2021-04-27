@@ -1,16 +1,16 @@
-import time
-import acme
 import collections
+import time
+
+import acme
+from acme.jax import utils
+from acme.utils import loggers
+import haiku as hk
 import jax
 import jax.numpy as jnp
-import haiku as hk
-import optax
-import tree
-from acme.utils import loggers
-from acme.jax import utils
 import numpy as np
-
+import optax
 import tensorflow_probability
+import tree
 
 tfp = tensorflow_probability.experimental.substrates.jax
 tfd = tfp.distributions
@@ -31,23 +31,24 @@ def compute_target(
 ):
   mean_tp1, logstd_tp1 = policy.apply(policy_params, o_tp1)
   action_tp1_base_dist = tfd.Normal(loc=mean_tp1, scale=jnp.exp(logstd_tp1))
-  action_tp1_dist = tfd.Independent(tfd.TransformedDistribution(action_tp1_base_dist, tfb.Tanh()), 1)
+  action_tp1_dist = tfd.Independent(
+      tfd.TransformedDistribution(action_tp1_base_dist, tfb.Tanh()), 1)
   # TODO handle constraints
   # Squash the action to be bounded between [-1, 1]
   next_actions = action_tp1_dist.sample(seed=rng)
   next_log_pis = action_tp1_dist.log_prob(next_actions)
-  q1_next_target, q2_next_target = critic.apply(critic_target_params, o_tp1, next_actions)
-  min_qf_next_target = jnp.minimum(q1_next_target, q2_next_target) - alpha * next_log_pis
+  q1_next_target, q2_next_target = critic.apply(critic_target_params, o_tp1,
+                                                next_actions)
+  min_qf_next_target = jnp.minimum(q1_next_target,
+                                   q2_next_target) - alpha * next_log_pis
   next_q_values = r_t + discount * d_t * min_qf_next_target
   return jax.lax.stop_gradient(next_q_values)
 
 
 def q_value_loss(policy, critic, rng, policy_params, critic_params,
-                 critic_target_params, o_t, a_t, r_t, o_tp1,
-                 d_t, alpha, discount):
-  next_q_values = compute_target(
-    policy, critic, rng, policy_params, critic_target_params, 
-    r_t, o_tp1, d_t, alpha, discount)
+                 critic_target_params, o_t, a_t, r_t, o_tp1, d_t, alpha, discount):
+  next_q_values = compute_target(policy, critic, rng, policy_params,
+                                 critic_target_params, r_t, o_tp1, d_t, alpha, discount)
   next_q_values = jax.lax.stop_gradient(next_q_values)
   q1, q2 = critic.apply(critic_params, o_t, a_t)
   q1_loss = jnp.square(q1 - next_q_values).mean()
@@ -55,12 +56,13 @@ def q_value_loss(policy, critic, rng, policy_params, critic_params,
   return 0.5 * (q1_loss + q2_loss)
 
 
-def policy_loss(policy, critic, policy_params, critic_params, rng, o_t,
-                a_t, alpha, discount):
+def policy_loss(policy, critic, policy_params, critic_params, rng, o_t, a_t, alpha,
+                discount):
   alpha = jax.lax.stop_gradient(alpha)
   mean_t, logstd_t = policy.apply(policy_params, o_t)
   action_tp1_base_dist = tfd.Normal(loc=mean_t, scale=jnp.exp(logstd_t))
-  action_tp1_dist = tfd.Independent(tfd.TransformedDistribution(action_tp1_base_dist, tfb.Tanh()), 1)
+  action_tp1_dist = tfd.Independent(
+      tfd.TransformedDistribution(action_tp1_base_dist, tfb.Tanh()), 1)
   # TODO handle constraints
   # Squash the action to be bounded between [-1, 1]
   squashed_action_t = action_tp1_dist.sample(seed=rng)
@@ -72,21 +74,24 @@ def policy_loss(policy, critic, policy_params, critic_params, rng, o_t,
   assert len(q2.shape) == 1
   min_qf = jnp.minimum(q1, q2)
   assert len(min_qf.shape) == 1
-  return (jax.lax.stop_gradient(alpha) * log_prob - jax.lax.stop_gradient(min_qf)).mean(), log_prob
+  return (jax.lax.stop_gradient(alpha) * log_prob
+          - jax.lax.stop_gradient(min_qf)).mean(), log_prob
+
 
 def action_log_prob(policy, policy_params, rng, o_t):
   mean_t, logstd_t = policy.apply(policy_params, o_t)
   action_tp1_base_dist = tfd.Normal(loc=mean_t, scale=jnp.exp(logstd_t))
-  action_tp1_dist = tfd.Independent(tfd.TransformedDistribution(action_tp1_base_dist, tfb.Tanh()), 1)
+  action_tp1_dist = tfd.Independent(
+      tfd.TransformedDistribution(action_tp1_base_dist, tfb.Tanh()), 1)
   # TODO handle constraints
   # Squash the action to be bounded between [-1, 1]
   squashed_action_t = action_tp1_dist.sample(seed=rng)
   log_prob = action_tp1_dist.log_prob(squashed_action_t)
   return squashed_action_t, log_prob
 
+
 def polyak_update(old_params, new_params, tau):
-  return jax.tree_multimap(lambda o, n: tau * n + (1 - tau) * o, old_params,
-                           new_params)
+  return jax.tree_multimap(lambda o, n: tau * n + (1 - tau) * o, old_params, new_params)
 
 
 def dummy_from_spec(spec):
@@ -108,7 +113,7 @@ class SACLearner(acme.Learner):
                lr_alpha=3e-4,
                init_alpha=1.0,
                discount=0.99,
-               tau=5e-3, 
+               tau=5e-3,
                logger=None):
     self._environment_spec = environment_spec
     self._policy_network = policy_network
@@ -156,17 +161,17 @@ class SACLearner(acme.Learner):
         "log_alpha": opt_state_alpha,
     }
 
-    self._logger = logger if logger is not None else loggers.TerminalLogger('learner', time_delta=10.)
+    self._logger = logger if logger is not None else loggers.TerminalLogger(
+        'learner', time_delta=10.)
 
     @jax.jit
     def sgd_step(batch, rng, params, opt_state):
-      o_t, a_t, r_t, d_t, o_tp1 = batch.data
-      # transitions = batch.data
-      # o_t = transitions.observation
-      # o_tp1 = transitions.next_observation
-      # a_t = transitions.action
-      # r_t = transitions.reward
-      # d_t = transitions.discount
+      transitions = batch.data
+      o_t = transitions.observation
+      o_tp1 = transitions.next_observation
+      a_t = transitions.action
+      r_t = transitions.reward
+      d_t = transitions.discount
 
       # Compute targets for the Q functions
       # y(r, s', d)
@@ -189,12 +194,10 @@ class SACLearner(acme.Learner):
       # )
       # Update Q-function by one step SGD
 
-      (critic_loss_, grad_critic) = (jax.value_and_grad(
-          q_value_loss,
-          argnums=4)(self._policy_network, self._critic_network, key_critic,
-                          policy_params, critic_params,
-                          critic_target_params, o_t, a_t, r_t,
-                          o_tp1, d_t, alpha, self._discount))
+      (critic_loss_, grad_critic) = (jax.value_and_grad(q_value_loss, argnums=4)(
+          self._policy_network, self._critic_network, key_critic, policy_params,
+          critic_params, critic_target_params, o_t, a_t, r_t, o_tp1, d_t, alpha,
+          self._discount))
       grad_critic_norm = optax.global_norm(grad_critic)
       critic_updates, critic_opt_state = self._opt_critic.update(
           grad_critic, critic_opt_state, critic_params)
@@ -205,19 +208,18 @@ class SACLearner(acme.Learner):
       (actor_loss, _), grad_policy = (jax.value_and_grad(
           policy_loss, argnums=2,
           has_aux=True)(self._policy_network, self._critic_network, policy_params,
-                        critic_params, key_policy, o_t, a_t, alpha,
-                        self._discount))
+                        critic_params, key_policy, o_t, a_t, alpha, self._discount))
       policy_grad_norm = optax.global_norm(grad_policy)
       policy_updates, policy_opt_state = self._opt_actor.update(
           grad_policy, policy_opt_state, policy_params)
       policy_params = optax.apply_updates(policy_params,
                                           policy_updates)  # update the parameters.
       # Update target networks
-      critic_target_params = optax.incremental_update(
-        critic_params,
-        critic_target_params, self._tau)
+      critic_target_params = optax.incremental_update(critic_params,
+                                                      critic_target_params, self._tau)
       #
-      _, log_probs = action_log_prob(self._policy_network, policy_params, key_alpha, o_t)
+      _, log_probs = action_log_prob(self._policy_network, policy_params, key_alpha,
+                                     o_t)
       # Update alpha
       log_alpha_loss, grad_log_alpha = jax.value_and_grad(self._loss_alpha)(log_alpha,
                                                                             log_probs)
@@ -261,7 +263,8 @@ class SACLearner(acme.Learner):
       log_probs: jnp.ndarray,
   ) -> jnp.ndarray:
     # Eqn. 18
-    alpha_losses = -1.0 * jnp.exp(log_alpha) * (jax.lax.stop_gradient(log_probs) + self.target_entropy)
+    alpha_losses = -1.0 * jnp.exp(log_alpha) * (jax.lax.stop_gradient(log_probs)
+                                                + self.target_entropy)
     return jnp.mean(alpha_losses, 0)
 
   def step(self):

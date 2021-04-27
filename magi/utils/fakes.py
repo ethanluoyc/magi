@@ -1,6 +1,7 @@
-from acme.testing import fakes
-from typing import List
+from typing import Sequence
+
 from acme import specs
+from acme.testing import fakes
 import numpy as np
 
 
@@ -10,7 +11,7 @@ class ContinuousVisualEnvironment(fakes.Environment):
   def __init__(self,
                *,
                action_dim: int = 1,
-               observation_shape: List[int] = (32, 32, 3),
+               observation_shape: Sequence[int] = (32, 32, 3),
                bounded: bool = False,
                dtype=np.float32,
                reward_dtype=np.float32,
@@ -37,10 +38,8 @@ class ContinuousVisualEnvironment(fakes.Environment):
     else:
       actions = specs.Array(action_shape, dtype)
 
-    super().__init__(
-        spec=specs.EnvironmentSpec(
-            observations=observations,
-            actions=actions,
-            rewards=rewards,
-            discounts=discounts),
-        **kwargs)
+    super().__init__(spec=specs.EnvironmentSpec(observations=observations,
+                                                actions=actions,
+                                                rewards=rewards,
+                                                discounts=discounts),
+                     **kwargs)

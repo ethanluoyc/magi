@@ -7,14 +7,14 @@ import random
 import time
 
 import gym
+from gym import spaces
 import numpy as np
+from pkg_resources import parse_version
 import pybullet as p
 import pybullet_data
-from gym import spaces
-from pkg_resources import parse_version
 from pybullet_envs.bullet import kuka
-from pybullet_utils import bullet_client as bc
 from pybullet_envs.bullet.kukaGymEnv import KukaGymEnv
+from pybullet_utils import bullet_client as bc
 
 # currentdir = os.path.dirname(
 #     os.path.abspath(inspect.getfile(inspect.currentframe())))
@@ -108,7 +108,9 @@ class KukaDiverseObjectEnv(KukaGymEnv):
       p.connect(p.DIRECT, options=optionstring)
       egl = pkgutil.get_loader('eglRenderer')
       if egl:
+        # pytype: disable=attribute-error
         pluginId = p.loadPlugin(egl.get_filename(), "_eglRendererPlugin")
+        # pytype: enable=attribute-error
       else:
         pluginId = p.loadPlugin("eglRendererPlugin")
       print("pluginId=", pluginId)
@@ -123,10 +125,11 @@ class KukaDiverseObjectEnv(KukaGymEnv):
     else:
       self.action_space = spaces.Box(low=-1, high=1, shape=(3,))  # dx, dy, da
       if self._removeHeightHack:
-        self.action_space = spaces.Box(
-            low=-1, high=1, shape=(4,))  # dx, dy, dz, da
-    self.observation_space = spaces.Box(
-        low=0, high=255, shape=(self._height, self._width, 3), dtype=np.uint8)
+        self.action_space = spaces.Box(low=-1, high=1, shape=(4,))  # dx, dy, dz, da
+    self.observation_space = spaces.Box(low=0,
+                                        high=255,
+                                        shape=(self._height, self._width, 3),
+                                        dtype=np.uint8)
     self.viewer = None
 
   def reset(self):
@@ -138,8 +141,8 @@ class KukaDiverseObjectEnv(KukaGymEnv):
     pitch = -56 + self._cameraRandom * np.random.uniform(-3, 3)
     yaw = 245 + self._cameraRandom * np.random.uniform(-3, 3)
     roll = 0
-    self._view_matrix = p.computeViewMatrixFromYawPitchRoll(
-        look, distance, yaw, pitch, roll, 2)
+    self._view_matrix = p.computeViewMatrixFromYawPitchRoll(look, distance, yaw, pitch,
+                                                            roll, 2)
     fov = 20. + self._cameraRandom * np.random.uniform(-2, 2)
     aspect = self._width / self._height
     near = 0.01
@@ -155,9 +158,8 @@ class KukaDiverseObjectEnv(KukaGymEnv):
     p.setTimeStep(self._timeStep)
     p.loadURDF(os.path.join(self._urdfRoot, "plane.urdf"), [0, 0, -1])
 
-    p.loadURDF(
-        os.path.join(self._urdfRoot, "table/table.urdf"), 0.5000000, 0.00000,
-        -.820000, 0.000000, 0.000000, 0.0, 1.0)
+    p.loadURDF(os.path.join(self._urdfRoot, "table/table.urdf"), 0.5000000, 0.00000,
+               -.820000, 0.000000, 0.000000, 0.0, 1.0)
 
     p.setGravity(0, 0, -10)
     self._kuka = kuka.Kuka(urdfRootPath=self._urdfRoot, timeStep=self._timeStep)
@@ -188,8 +190,7 @@ class KukaDiverseObjectEnv(KukaGymEnv):
       angle = np.pi / 2 + self._blockRandom * np.pi * random.random()
       orn = p.getQuaternionFromEuler([0, 0, angle])
       urdf_path = os.path.join(self._urdfRoot, urdf_name)
-      uid = p.loadURDF(urdf_path, [xpos, ypos, .15],
-                       [orn[0], orn[1], orn[2], orn[3]])
+      uid = p.loadURDF(urdf_path, [xpos, ypos, .15], [orn[0], orn[1], orn[2], orn[3]])
       objectUids.append(uid)
       # Let each object fall to the tray individual, to prevent object
       # intersection.
@@ -200,11 +201,10 @@ class KukaDiverseObjectEnv(KukaGymEnv):
   def _get_observation(self):
     """Return the observation as an image.
     """
-    img_arr = p.getCameraImage(
-        width=self._width,
-        height=self._height,
-        viewMatrix=self._view_matrix,
-        projectionMatrix=self._proj_matrix)
+    img_arr = p.getCameraImage(width=self._width,
+                               height=self._height,
+                               viewMatrix=self._view_matrix,
+                               projectionMatrix=self._proj_matrix)
     rgb = img_arr[2]
     np_img_arr = np.reshape(rgb, (self._height, self._width, 4))
     return np_img_arr[:, :, :3]
@@ -339,8 +339,7 @@ class KukaDiverseObjectEnv(KukaGymEnv):
       urdf_pattern = os.path.join(self._urdfRoot, 'random_urdfs/*[1-9]/*.urdf')
     found_object_directories = glob.glob(urdf_pattern)
     total_num_objects = len(found_object_directories)
-    selected_objects = np.random.choice(
-        np.arange(total_num_objects), num_objects)
+    selected_objects = np.random.choice(np.arange(total_num_objects), num_objects)
     selected_objects_filenames = []
     for object_index in selected_objects:
       selected_objects_filenames += [found_object_directories[object_index]]

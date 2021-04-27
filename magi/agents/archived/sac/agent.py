@@ -1,24 +1,20 @@
-from os import environ
-import acme
-from acme.agents import agent
-from acme.agents.jax import actors
-from acme import core, types
-from magi.agents.jax.sac import learning
-from magi.agents.jax.sac import acting
-from acme.jax import variable_utils
+import dataclasses
+
 from acme.adders import reverb as adders
+from acme.agents import agent
 from acme import datasets
-import reverb
-from reverb import rate_limiters
+from acme.jax import variable_utils
+from acme import types
+import dm_env
+import haiku as hk
 import jax
 import jax.numpy as jnp
-import haiku as hk
-import optax
-import dm_env
-from acme.jax import utils
-
+import reverb
+from reverb import rate_limiters
 import tensorflow_probability
-import dataclasses
+
+from magi.agents.archived.sac import acting
+from magi.agents.archived.sac import learning
 
 tfp = tensorflow_probability.experimental.substrates.jax
 tfd = tfp.distributions
@@ -82,7 +78,8 @@ class SACAgent(agent.Agent):
                environment_spec,
                policy_network,
                critic_network,
-               key, logger=None):
+               key,
+               logger=None):
     learner_key, actor_key, explore_key = jax.random.split(key, 3)
     rng = hk.PRNGSequence(actor_key)
     config = SACConfig()
@@ -110,8 +107,12 @@ class SACAgent(agent.Agent):
                                            transition_adder=True)
     self._batch_size = config.batch_size
 
-    learner = learning.SACLearner(environment_spec, policy_network, critic_network,
-                                  dataset.as_numpy_iterator(), learner_key, logger=logger)
+    learner = learning.SACLearner(environment_spec,
+                                  policy_network,
+                                  critic_network,
+                                  dataset.as_numpy_iterator(),
+                                  learner_key,
+                                  logger=logger)
     self._learner = learner
     variable_client = variable_utils.VariableClient(learner, '')
 

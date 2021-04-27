@@ -1,7 +1,15 @@
 """Soft Actor-Critic implementation"""
 from functools import partial
-from typing import Iterable, Iterator, List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple
 
+from acme.adders import reverb as adders
+from acme import core
+from acme import datasets
+from acme.jax import utils
+from acme.jax import variable_utils
+from acme import specs
+from acme.utils import counting
+from acme.utils import loggers
 import dm_env
 import haiku as hk
 import jax
@@ -9,12 +17,8 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import reverb
-import tensorflow_probability
-from acme import core, datasets, specs
-from acme.utils import loggers, counting
-from acme.adders import reverb as adders
-from acme.jax import utils, variable_utils
 from reverb import rate_limiters
+import tensorflow_probability
 
 tfp = tensorflow_probability.experimental.substrates.jax
 tfd = tfp.distributions
@@ -218,17 +222,13 @@ class SACLearner(core.Learner):
     self.params_critic = self.params_critic_target = self.critic.init(
         next(self._rng), dummy_state, dummy_action)
     opt_init, self.opt_critic = optax.chain(
-      optax.clip_by_global_norm(max_gradient_norm),
-      optax.adam(lr_critic)
-    )
+        optax.clip_by_global_norm(max_gradient_norm), optax.adam(lr_critic))
     self.opt_state_critic = opt_init(self.params_critic)
     # Actor.
     self.actor = policy
     self.params_actor = self.actor.init(next(self._rng), dummy_state)
-    opt_init, self.opt_actor = optax.chain(
-      optax.clip_by_global_norm(max_gradient_norm),
-      optax.adam(lr_actor)
-    )
+    opt_init, self.opt_actor = optax.chain(optax.clip_by_global_norm(max_gradient_norm),
+                                           optax.adam(lr_actor))
     self.opt_state_actor = opt_init(self.params_actor)
     # Entropy coefficient.
     self.target_entropy = heuristic_target_entropy(environment_spec.actions)
@@ -325,13 +325,13 @@ class SACLearner(core.Learner):
         weight=weight,
     )
     # Update actor
-    self.params_actor, self.opt_state_actor, loss_actor, mean_log_pi = self._update_actor(
-        self.params_actor,
-        self.opt_state_actor,
-        key=next(self._rng),
-        params_critic=self.params_critic,
-        log_alpha=self.log_alpha,
-        state=state)
+    self.params_actor, self.opt_state_actor, loss_actor, mean_log_pi = (
+        self._update_actor(self.params_actor,
+                           self.opt_state_actor,
+                           key=next(self._rng),
+                           params_critic=self.params_critic,
+                           log_alpha=self.log_alpha,
+                           state=state))
     self.log_alpha, self.opt_state_alpha, loss_alpha, _ = self._update_alpha(
         self.log_alpha,
         self.opt_state_alpha,
@@ -434,7 +434,8 @@ class SACAgent(core.Actor):
                logger=None,
                counter=None):
     # self.rng = hk.PRNGSequence(seed)
-    learner_key, actor_key, actor_key2, random_key = jax.random.split(jax.random.PRNGKey(seed), 4)
+    learner_key, actor_key, actor_key2, random_key = jax.random.split(
+        jax.random.PRNGKey(seed), 4)
     self._num_observations = 0
     self._start_steps = start_steps
 
