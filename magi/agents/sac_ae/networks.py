@@ -186,7 +186,7 @@ class ContinuousQFunction(hk.Module):
           hidden_scale=np.sqrt(2),
       )(x)
 
-    x = jnp.concatenate([s, a], axis=1)
+    x = jnp.concatenate([s, a], axis=-1)
     # Return list even if num_critics == 1 for simple implementation.
     return [_fn(x).squeeze(-1) for _ in range(self.num_critics)]
 

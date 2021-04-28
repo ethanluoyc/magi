@@ -230,7 +230,7 @@ def make_ae_loss_fn(encoder_apply, linear_apply, decoder_apply, lambda_latent,
 
 def _loss_alpha(log_alpha: jnp.ndarray, mean_log_pi: jnp.ndarray,
                 target_entropy) -> jnp.ndarray:
-  return -log_alpha * (target_entropy + mean_log_pi), None
+  return -jnp.exp(log_alpha) * (target_entropy + mean_log_pi), None
 
 
 @dataclasses.dataclass
@@ -429,10 +429,9 @@ class SACAEAgent(core.Actor, core.VariableSource):
   def update(self, wait: bool = True):
     if not self._should_update():
       return
-    self._num_learning_steps += 1
     batch = next(self._iterator)
     start = time.time()
-    transitions = batch.data
+    transitions = jax.device_put(batch.data)
     state = transitions.observation
     next_state = transitions.next_observation
     action = transitions.action
@@ -516,6 +515,7 @@ class SACAEAgent(core.Actor, core.VariableSource):
           self._critic_target_params, self._critic_params)
     self._policy_actor.update(wait=wait)
 
+    self._num_learning_steps += 1
     metrics = utils.to_numpy(metrics)
     counts = self._counter.increment(steps=1, time_elapsed=time.time() - start)
 

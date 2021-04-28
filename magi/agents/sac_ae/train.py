@@ -1,3 +1,4 @@
+from magi.agents.sac_ae.agent import SACAEConfig
 import time
 
 from absl import app
@@ -19,11 +20,13 @@ flags.DEFINE_string('task_name', 'run', 'dm_control task')
 flags.DEFINE_bool('wandb', False, 'whether to log result to wandb')
 flags.DEFINE_string('wandb_project', 'magi', 'wandb project name')
 flags.DEFINE_string('wandb_entity', 'ethanluoyc', 'wandb project entity')
-flags.DEFINE_integer('num_steps', int(1e6), 'Random seed.')
-flags.DEFINE_integer('eval_freq', 5000, 'Random seed.')
-flags.DEFINE_integer('eval_episodes', 10, 'Random seed.')
-flags.DEFINE_integer('frame_stack', 3, 'Random seed.')
-flags.DEFINE_integer('action_repeat', 4, 'Random seed.')
+flags.DEFINE_string('logdir', './logs', '')
+flags.DEFINE_integer('num_steps', int(1e6), '')
+flags.DEFINE_integer('eval_freq', 5000, '')
+flags.DEFINE_integer('eval_episodes', 10, '')
+flags.DEFINE_integer('frame_stack', 3, '')
+flags.DEFINE_integer('action_repeat', 4, '')
+flags.DEFINE_integer('max_replay_size', int(100000), 'Random seed.')
 flags.DEFINE_integer('seed', 0, 'Random seed.')
 
 # def load_env(domain_name, task_name, seed, frame_stack=3, action_repeat=4):
@@ -62,7 +65,7 @@ def main(_):
     wandb.init(project=FLAGS.wandb_project,
                entity=FLAGS.wandb_entity,
                name=experiment_name,
-               config=FLAGS)
+               config=FLAGS, dir=FLAGS.logdir)
   env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed, FLAGS.frame_stack,
                  FLAGS.action_repeat)
   test_env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed + 1000,
@@ -72,6 +75,7 @@ def main(_):
 
   agent = sac_ae.SACAEAgent(environment_spec=spec,
                             networks=network_spec,
+                            config=SACAEConfig(max_replay_size=FLAGS.max_replay_size),
                             seed=FLAGS.seed,
                             logger=loggers.make_logger(label='learner',
                                                        time_delta=60,
