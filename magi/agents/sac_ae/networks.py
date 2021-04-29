@@ -48,31 +48,8 @@ class DeltaOrthogonal(hk.initializers.Initializer):
     self.axis = axis
 
   def __call__(self, shape: Sequence[int], dtype) -> jnp.ndarray:
-    if len(shape) not in [3, 4, 5]:
-      raise ValueError("Delta orthogonal initializer requires 3D, 4D or 5D shape.")
-    w_mat = jnp.zeros(shape, dtype=dtype)
-    w_orthogonal = hk.initializers.Orthogonal(self.scale, self.axis)(shape[-2:], dtype)
-    if len(shape) == 3:
-      k = shape[0]
-      return jax.ops.index_update(
-          w_mat,
-          jax.ops.index[(k - 1) // 2, ...],
-          w_orthogonal,
-      )
-    elif len(shape) == 4:
-      k1, k2 = shape[:2]
-      return jax.ops.index_update(
-          w_mat,
-          jax.ops.index[(k1 - 1) // 2, (k2 - 1) // 2, ...],
-          w_orthogonal,
-      )
-    else:
-      k1, k2, k3 = shape[:3]
-      return jax.ops.index_update(
-          w_mat,
-          jax.ops.index[(k1 - 1) // 2, (k2 - 1) // 2, (k3 - 1) // 2, ...],
-          w_orthogonal,
-      )
+    init_fn = jax.nn.initializers.delta_orthogonal(self.scale, self.axis)
+    return init_fn(hk.next_rng_key(), shape, dtype)
 
 
 class StateDependentGaussianPolicy(hk.Module):
@@ -156,7 +133,7 @@ class SACLinear(hk.Module):
   def __call__(self, x):
     w_init = hk.initializers.Orthogonal(scale=1.0)
     x = hk.Linear(self.feature_dim, w_init=w_init)(x)
-    x = hk.LayerNorm(axis=1, create_scale=True, create_offset=True)(x)
+    x = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(x)
     x = jnp.tanh(x)
     return x
 
