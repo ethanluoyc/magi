@@ -77,11 +77,14 @@ class StateDependentGaussianPolicy(hk.Module):
         2 * self.action_size,
         self.hidden_units,
         hidden_activation=nn.relu,
+        hidden_scale=jnp.sqrt(2.),
     )(x)
     mean, log_std = jnp.split(x, 2, axis=1)
     if self.clip_log_std:
       log_std = jnp.clip(log_std, self.log_std_min, self.log_std_max)
     else:
+      # From Dennis Yarats
+      # https://github.com/denisyarats/pytorch_sac/blob/929cc6e7efbe7637c2ee1c43e2e7d4b3ad223523/agent/actor.py#L77
       log_std = self.log_std_min + 0.5 * (self.log_std_max - self.log_std_min) * (
           jnp.tanh(log_std) + 1.0)
     return GaussianTanhTransformedHead(mean, log_std)
@@ -92,31 +95,31 @@ class SACEncoder(hk.Module):
     Encoder for SAC+AE.
     """
 
-  def __init__(self, num_layers=4, num_filters=32, negative_slope=0.1):
+  def __init__(self, num_layers=4, num_filters=32):
     super().__init__()
     self.num_layers = num_layers
     self.num_filters = num_filters
-    self.negative_slope = negative_slope
+    self._activation = jax.nn.relu
 
   def __call__(self, x):
     # Floatify the image.
     x = x.astype(jnp.float32) / 255.0
 
     # Apply CNN.
-    w_init = DeltaOrthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
+    w_init = DeltaOrthogonal(scale=np.sqrt(2.))
     x = hk.Conv2D(self.num_filters,
                   kernel_shape=4,
                   stride=2,
                   padding="VALID",
                   w_init=w_init)(x)
-    x = nn.leaky_relu(x, self.negative_slope)
+    x = self._activation(x)
     for _ in range(self.num_layers - 1):
       x = hk.Conv2D(self.num_filters,
                     kernel_shape=3,
                     stride=1,
                     padding="VALID",
                     w_init=w_init)(x)
-      x = nn.leaky_relu(x, self.negative_slope)
+      x = self._activation(x)
     # Flatten the feature map.
     return hk.Flatten()(x)
 
@@ -124,7 +127,11 @@ class SACEncoder(hk.Module):
 class SACLinear(hk.Module):
   """
     Linear layer for SAC+AE.
-    """
+    This includes a linear layer, followed by layer normalization and tanh.
+    The block is used to project the features from the CNN encoder to the latent space
+    used by the actor and critic. Note that in SAC_AE, there are two of these blocks
+    which are used by the actor and critic respectively and they do not share weights.
+  """
 
   def __init__(self, feature_dim):
     super().__init__()
@@ -160,7 +167,7 @@ class ContinuousQFunction(hk.Module):
           1,
           self.hidden_units,
           hidden_activation=nn.relu,
-          hidden_scale=np.sqrt(2),
+          hidden_scale=jnp.sqrt(2.),
       )(x)
 
     x = jnp.concatenate([s, a], axis=-1)
@@ -173,31 +180,31 @@ class SACDecoder(hk.Module):
     Decoder for SAC+AE.
     """
 
-  def __init__(self, state_shape, num_layers=4, num_filters=32, negative_slope=0.1):
+  def __init__(self, state_shape, num_layers=4, num_filters=32):
     super().__init__()
     self.state_shape = state_shape
     self.num_layers = num_layers
     self.num_filters = num_filters
-    self.negative_slope = negative_slope
+    self._activation = jax.nn.relu
     self.map_size = 43 - 2 * num_layers
     self.last_conv_dim = num_filters * self.map_size * self.map_size
 
   def __call__(self, x):
     # Apply linear layer.
-    w_init = hk.initializers.Orthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
+    w_init = hk.initializers.Orthogonal(scale=jnp.sqrt(2.))
     x = hk.Linear(self.last_conv_dim, w_init=w_init)(x)
-    x = nn.leaky_relu(x, self.negative_slope).reshape(-1, self.map_size, self.map_size,
-                                                      self.num_filters)
+    x = self._activation(x).reshape(-1, self.map_size, self.map_size,
+                                    self.num_filters)
 
     # Apply Transposed CNN.
-    w_init = DeltaOrthogonal(scale=np.sqrt(2 / (1 + self.negative_slope**2)))
+    w_init = DeltaOrthogonal(scale=np.sqrt(2.))
     for _ in range(self.num_layers - 1):
       x = hk.Conv2DTranspose(self.num_filters,
                              kernel_shape=3,
                              stride=1,
                              padding="VALID",
                              w_init=w_init)(x)
-      x = nn.leaky_relu(x, self.negative_slope)
+      x = self._activation(x)
 
     # Apply output layer.
     w_init = DeltaOrthogonal(scale=1.0)
@@ -207,90 +214,6 @@ class SACDecoder(hk.Module):
                            padding="VALID",
                            w_init=w_init)(x)
     return x
-
-
-class SLACEncoder(hk.Module):
-  """
-    Encoder for SLAC.
-    """
-
-  def __init__(self, output_dim=256, negative_slope=0.2):
-    super().__init__()
-    self.output_dim = output_dim
-    self.negative_slope = negative_slope
-
-  def __call__(self, x):
-    B, S, H, W, C = x.shape  # pylint: disable=invalid-name
-
-    # Floatify the image.
-    x = x.astype(jnp.float32) / 255.0
-    # Reshape.
-    x = x.reshape([B * S, H, W, C])
-    # Apply CNN.
-    w_init = DeltaOrthogonal(scale=1.0)
-    depth = [32, 64, 128, 256, self.output_dim]
-    kernel = [5, 3, 3, 3, 4]
-    stride = [2, 2, 2, 2, 1]
-    padding = ["SAME", "SAME", "SAME", "SAME", "VALID"]
-
-    for i in range(5):
-      x = hk.Conv2D(
-          depth[i],
-          kernel_shape=kernel[i],
-          stride=stride[i],
-          padding=padding[i],
-          w_init=w_init,
-      )(x)
-      x = nn.leaky_relu(x, self.negative_slope)
-
-    return x.reshape([B, S, -1])
-
-
-class SLACDecoder(hk.Module):
-  """
-    Decoder for SLAC.
-    """
-
-  def __init__(self, state_space, std=1.0, negative_slope=0.2):
-    super().__init__()
-    self.state_space = state_space
-    self.std = std
-    self.negative_slope = negative_slope
-
-  def __call__(self, x):
-    B, S, latent_dim = x.shape  # pylint: disable=invalid-name
-
-    # Reshape.
-    x = x.reshape([B * S, 1, 1, latent_dim])
-
-    # Apply CNN.
-    w_init = DeltaOrthogonal(scale=1.0)
-    depth = [256, 128, 64, 32, self.state_space.shape[2]]
-    kernel = [4, 3, 3, 3, 5]
-    stride = [1, 2, 2, 2, 2]
-    padding = ["VALID", "SAME", "SAME", "SAME", "SAME"]
-
-    for i in range(4):
-      x = hk.Conv2DTranspose(
-          depth[i],
-          kernel_shape=kernel[i],
-          stride=stride[i],
-          padding=padding[i],
-          w_init=w_init,
-      )(x)
-      x = nn.leaky_relu(x, self.negative_slope)
-
-    x = hk.Conv2DTranspose(
-        depth[-1],
-        kernel_shape=kernel[-1],
-        stride=stride[-1],
-        padding=padding[-1],
-        w_init=w_init,
-    )(x)
-
-    _, W, H, C = x.shape  # pylint: disable=invalid-name
-    x = x.reshape([B, S, W, H, C])
-    return x, jax.lax.stop_gradient(jnp.ones_like(x) * self.std)
 
 
 @dataclass
@@ -333,6 +256,11 @@ def gaussian_and_tanh_log_prob(
 ) -> jnp.ndarray:
   """
     Calculate log probabilities of gaussian distributions and tanh transformation.
+    Notes:
+      There are numerical issues when the action is near the boundaries
+      The relu(.) + 1e-6 is used to ensure that the inputs to log() is larger than 1e-6.
+      to avoid really small output.
+      This is the the trick adapted used in rlljax, pytorch_sac, pytorch_sac_ae.
     """
   return gaussian_log_prob(log_std,
                            noise) - jnp.log(nn.relu(1.0 - jnp.square(action)) + 1e-6)
@@ -370,6 +298,9 @@ def make_default_networks(
 
   def critic(x, a):
     # Define without linear layer.
+    # We need to define the linear layer outside the critic because the decoder needs
+    # to use the latents from the output AFTER applying the linear layer for
+    # reconstruction.
     return ContinuousQFunction(
         num_critics=num_critics,
         hidden_units=critic_hidden_sizes,
@@ -377,6 +308,8 @@ def make_default_networks(
 
   def actor(x):
     # Define with linear layer.
+    # Since the actor path is not needed for reconstruction we can put the linear
+    # layer for the actor path here.
     x = SACLinear(feature_dim=latent_size)(x)
     return StateDependentGaussianPolicy(
         action_size=environment_spec.actions.shape[0],

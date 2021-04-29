@@ -23,52 +23,6 @@ from reverb import rate_limiters
 from magi.agents import actors
 from magi.agents.sac import acting as acting_lib
 
-# TODO(yl): debug numerical issues with using tfp distributions instead of
-# manually handling tanh transformations
-# @jax.jit
-# def gaussian_log_prob(
-#     log_std: jnp.ndarray,
-#     noise: jnp.ndarray,
-# ) -> jnp.ndarray:
-#   """
-#     Calculate log probabilities of gaussian distributions.
-#     """
-#   return -0.5 * (jnp.square(noise) + 2 * log_std + jnp.log(2 * math.pi))
-
-# @jax.jit
-# def gaussian_and_tanh_log_prob(
-#     log_std: jnp.ndarray,
-#     noise: jnp.ndarray,
-#     action: jnp.ndarray,
-# ) -> jnp.ndarray:
-#   """
-#     Calculate log probabilities of gaussian distributions and tanh transformation.
-#     """
-#   return gaussian_log_prob(log_std,
-#                            noise) - jnp.log(nn.relu(1.0 - jnp.square(action)) + 1e-6)
-
-# @partial(jax.jit, static_argnums=2)
-# def reparameterize_gaussian_and_tanh(
-#     dist,
-#     key: jnp.ndarray,
-#     return_log_pi: bool = True,
-# ) -> Tuple[jnp.ndarray, jnp.ndarray]:
-#   """
-#     Sample from gaussian distributions and tanh transforamation.
-#     """
-#   # dist = _output_to_dist(mean, log_std)
-#   action = dist.sample(seed=key)
-#   if return_log_pi:
-#     return action, dist.log_prob(action)
-#   return action
-#   # std = jnp.exp(log_std)
-#   # noise = jax.random.normal(key, std.shape)
-#   # action = jnp.tanh(mean + noise * std)
-#   # if return_log_pi:
-#   #   return action, gaussian_and_tanh_log_prob(log_std, noise, action).sum(axis=1)
-#   # else:
-#   #   return action
-
 
 def heuristic_target_entropy(action_spec):
   """Compute the heuristic target entropy"""
