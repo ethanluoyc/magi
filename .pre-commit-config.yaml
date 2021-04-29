@@ -23,3 +23,5 @@ repos:
   rev: 3.8.3
   hooks:
   - id: flake8
+    args: ['--config=setup.cfg']
+    exclude: (magi/agents/archived|magi/experimental)
