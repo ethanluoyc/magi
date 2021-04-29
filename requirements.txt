@@ -5,3 +5,4 @@ git+https://github.com/deepmind/acme.git@master#egg=dm-acme[jax,reverb,envs,tf]
 tfp-nightly
 pandas
 wandb
+pybullet
