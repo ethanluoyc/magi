@@ -100,19 +100,6 @@ def _calculate_log_pi(
   del action
   return log_pi
 
-
-def _calculate_loss_critic_and_abs_td(
-    value_list: List[jnp.ndarray],
-    target: jnp.ndarray,
-    weight: np.ndarray,
-) -> jnp.ndarray:
-  abs_td = jnp.abs(target - value_list[0])
-  loss_critic = (jnp.square(abs_td) * weight).mean()
-  for value in value_list[1:]:
-    loss_critic += (jnp.square(target - value) * weight).mean()
-  return loss_critic, jax.lax.stop_gradient(abs_td)
-
-
 # Loss functions
 def make_critic_loss_fn(encoder_apply, actor_apply, critic_apply, gamma):
 
@@ -122,46 +109,25 @@ def make_critic_loss_fn(encoder_apply, actor_apply, critic_apply, gamma):
                    action: np.ndarray, reward: np.ndarray, discount: np.ndarray,
                    next_state: np.ndarray, weight: np.ndarray or List[jnp.ndarray],
                    key) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    next_last_conv = encoder_apply(params_critic['encoder'], next_state)
+    next_dist = actor_apply(params_actor, next_last_conv)
+    next_actions, next_log_probs = next_dist.sample_and_log_prob(key)
+
+    # Calculate q target values
+    next_last_conv_target = encoder_apply(params_critic_target['encoder'], next_state)
+    next_q1, next_q2 = critic_apply(params_critic_target['critic'],
+                                    next_last_conv_target, next_actions)
+    next_q = jnp.minimum(next_q1, next_q2)
+    target_q = next_q - gamma * reward * discount * jnp.exp(log_alpha) * next_log_probs
+    # Calculate predicted Q
     last_conv = encoder_apply(params_critic['encoder'], state)
-    next_last_conv = jax.lax.stop_gradient(
-        encoder_apply(params_critic['encoder'], next_state))
-    next_action, next_log_pi = actor_apply(params_actor,
-                                           next_last_conv).sample_and_log_prob(key)
-    target = _calculate_target(critic_apply, params_critic_target, log_alpha, reward,
-                               discount, next_last_conv, next_action, next_log_pi,
-                               gamma)
-    q_list = _calculate_value_list(critic_apply, params_critic, last_conv, action)
-    return _calculate_loss_critic_and_abs_td(q_list, target, weight)
+    q1, q2 = critic_apply(params_critic['critic'], last_conv, action)
+    abs_td = jnp.abs(target_q - q1)
+    loss_critic = ((jnp.square(target_q - q1) + jnp.square(target_q - q2))
+                   * weight).mean()
+    return loss_critic, jax.lax.stop_gradient(abs_td)
 
   return _loss_critic
-
-
-def _calculate_target(critic_apply, params_critic_target: hk.Params,
-                      log_alpha: jnp.ndarray, reward: np.ndarray, discount: np.ndarray,
-                      next_state: np.ndarray, next_action: jnp.ndarray,
-                      next_log_pi: jnp.ndarray, gamma) -> jnp.ndarray:
-  next_q = _calculate_value(critic_apply, params_critic_target, next_state, next_action)
-  next_q -= jnp.exp(log_alpha) * _calculate_log_pi(next_action, next_log_pi)
-  return jax.lax.stop_gradient(reward + discount * gamma * next_q)
-
-
-def _calculate_value_list(
-    critic_apply,
-    params_critic: hk.Params,
-    last_conv: np.ndarray,
-    action: np.ndarray,
-) -> List[jnp.ndarray]:
-  return critic_apply(params_critic['critic'], last_conv, action)
-
-
-def _calculate_value(
-    critic_apply,
-    params_critic: hk.Params,
-    state: np.ndarray,
-    action: np.ndarray,
-) -> jnp.ndarray:
-  return jnp.asarray(_calculate_value_list(critic_apply, params_critic, state,
-                                           action)).min(axis=0)
 
 
 def make_actor_loss_fn(encoder_apply, actor_apply, critic_apply):
@@ -171,18 +137,20 @@ def make_actor_loss_fn(encoder_apply, actor_apply, critic_apply):
                   log_alpha: jnp.ndarray, state: np.ndarray,
                   key) -> Tuple[jnp.ndarray, jnp.ndarray]:
     last_conv = jax.lax.stop_gradient(encoder_apply(params_critic['encoder'], state))
-    action, log_pi = actor_apply(params_actor, last_conv).sample_and_log_prob(key)
-    mean_q = _calculate_value(critic_apply, params_critic, last_conv, action).mean()
-    mean_log_pi = _calculate_log_pi(action, log_pi).mean()
-    return jax.lax.stop_gradient(
-        jnp.exp(log_alpha)) * mean_log_pi - mean_q, jax.lax.stop_gradient(mean_log_pi)
+    action, log_probs = actor_apply(params_actor, last_conv).sample_and_log_prob(key)
+    q1, q2 = critic_apply(params_critic['critic'], last_conv, action)
+    q = jnp.minimum(q1, q2)
+    actor_loss = (log_probs * jnp.exp(log_alpha) - q).mean()
+    entropy = -log_probs.mean()
+    return actor_loss, entropy
 
   return _loss_actor
 
 
-def _loss_alpha(log_alpha: jnp.ndarray, mean_log_pi: jnp.ndarray,
+def _loss_alpha(log_alpha: jnp.ndarray, entropy: jnp.ndarray,
                 target_entropy) -> jnp.ndarray:
-  return -jnp.exp(log_alpha) * (target_entropy + mean_log_pi), None
+  temperature = jnp.exp(log_alpha)
+  return temperature * (entropy - target_entropy).mean(), None
 
 
 @dataclasses.dataclass
@@ -390,7 +358,7 @@ class DrQAgent(core.Actor, core.VariableSource):
 
     # Update actor and alpha.
     if self._num_learning_steps % self._actor_update_frequency == 0:
-      self._opt_state_actor, self._actor_params, loss_actor, mean_log_pi = optimize(
+      self._opt_state_actor, self._actor_params, loss_actor, entropy = optimize(
           self._actor_loss_fn,
           self._opt_actor.update,
           self._opt_state_actor,
@@ -406,7 +374,7 @@ class DrQAgent(core.Actor, core.VariableSource):
           self._opt_state_alpha,
           self._log_alpha,
           None,
-          mean_log_pi=mean_log_pi,
+          entropy=entropy,
       )
       metrics['alpha_loss'] = loss_alpha
       metrics['actor_loss'] = loss_actor

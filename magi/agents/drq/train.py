@@ -26,8 +26,9 @@ flags.DEFINE_integer('eval_freq', 5000, '')
 flags.DEFINE_integer('eval_episodes', 10, '')
 flags.DEFINE_integer('frame_stack', 3, '')
 flags.DEFINE_integer('action_repeat', 4, '')
-flags.DEFINE_integer('max_replay_size', int(100000), 'Random seed.')
-flags.DEFINE_integer('seed', 0, 'Random seed.')
+flags.DEFINE_integer('max_replay_size', 100_000, 'Minimum replay size')
+flags.DEFINE_integer('batch_size', 512, 'Batch size')
+flags.DEFINE_integer('seed', 42, 'Random seed.')
 
 
 def load_env(domain_name, task_name, seed, frame_stack, action_repeat):
@@ -45,7 +46,7 @@ def main(_):
   np.random.seed(FLAGS.seed)
   if FLAGS.wandb:
     import wandb  # pylint: disable=import-outside-toplevel
-    experiment_name = (f'sac_ae-{FLAGS.domain_name}-{FLAGS.task_name}_'
+    experiment_name = (f'drq-{FLAGS.domain_name}-{FLAGS.task_name}_'
                        f'{FLAGS.seed}_{int(time.time())}')
     wandb.init(project=FLAGS.wandb_project,
                entity=FLAGS.wandb_entity,
@@ -61,7 +62,10 @@ def main(_):
 
   agent = drq.DrQAgent(environment_spec=spec,
                        networks=network_spec,
-                       config=DrQConfig(max_replay_size=FLAGS.max_replay_size),
+                       config=DrQConfig(max_replay_size=FLAGS.max_replay_size,
+                                        batch_size=FLAGS.batch_size,
+                                        temperature_adam_b1=0.9,
+                                        ),
                        seed=FLAGS.seed,
                        logger=loggers.make_logger(label='learner',
                                                   time_delta=60,
