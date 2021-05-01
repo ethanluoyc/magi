@@ -93,13 +93,6 @@ def clip_gradient_norm(
   return jax.tree_map(lambda g: _clip_gradient_norm(g), grad)
 
 
-def _calculate_log_pi(
-    action: np.ndarray,
-    log_pi: np.ndarray,
-) -> jnp.ndarray:
-  del action
-  return log_pi
-
 # Loss functions
 def make_critic_loss_fn(encoder_apply, actor_apply, critic_apply, gamma):
 
@@ -118,7 +111,7 @@ def make_critic_loss_fn(encoder_apply, actor_apply, critic_apply, gamma):
     next_q1, next_q2 = critic_apply(params_critic_target['critic'],
                                     next_last_conv_target, next_actions)
     next_q = jnp.minimum(next_q1, next_q2)
-    target_q = next_q - gamma * reward * discount * jnp.exp(log_alpha) * next_log_probs
+    target_q = jax.lax.stop_gradient(next_q - gamma * reward * discount * jnp.exp(log_alpha) * next_log_probs)
     # Calculate predicted Q
     last_conv = encoder_apply(params_critic['encoder'], state)
     q1, q2 = critic_apply(params_critic['critic'], last_conv, action)

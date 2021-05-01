@@ -27,7 +27,7 @@ flags.DEFINE_integer('eval_episodes', 10, '')
 flags.DEFINE_integer('frame_stack', 3, '')
 flags.DEFINE_integer('action_repeat', 4, '')
 flags.DEFINE_integer('max_replay_size', 100_000, 'Minimum replay size')
-flags.DEFINE_integer('batch_size', 512, 'Batch size')
+flags.DEFINE_integer('batch_size', 128, 'Batch size')
 flags.DEFINE_integer('seed', 42, 'Random seed.')
 
 
