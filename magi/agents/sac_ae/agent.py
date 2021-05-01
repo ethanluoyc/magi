@@ -140,9 +140,11 @@ def make_critic_loss_fn(encoder_apply, actor_apply, linear_apply, critic_apply, 
         encoder_apply(params_critic['encoder'], next_state))
     next_action, next_log_pi = actor_apply(params_actor,
                                            next_last_conv).sample_and_log_prob(key)
+    next_last_conv_target = jax.lax.stop_gradient(
+        encoder_apply(params_critic_target['encoder'], next_state))
     target = _calculate_target(linear_apply, critic_apply, params_critic_target,
-                               log_alpha, reward, discount, next_last_conv, next_action,
-                               next_log_pi, gamma)
+                               log_alpha, reward, discount, next_last_conv_target,
+                               next_action, next_log_pi, gamma)
     q_list = _calculate_value_list(linear_apply, critic_apply, params_critic, last_conv,
                                    action)
     return _calculate_loss_critic_and_abs_td(q_list, target, weight)
