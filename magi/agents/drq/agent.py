@@ -104,16 +104,16 @@ def make_critic_loss_fn(encoder_apply, actor_apply, critic_apply, gamma):
                    key) -> Tuple[jnp.ndarray, jnp.ndarray]:
     next_last_conv = encoder_apply(params_critic['encoder'], next_state)
     next_dist = actor_apply(params_actor, next_last_conv)
-    next_actions, next_log_probs = next_dist.sample_and_log_prob(key)
+    next_actions, next_log_probs = next_dist.sample_and_log_prob(seed=key)
 
     # Calculate q target values
     next_last_conv_target = encoder_apply(params_critic_target['encoder'], next_state)
     next_q1, next_q2 = critic_apply(params_critic_target['critic'],
                                     next_last_conv_target, next_actions)
     next_q = jnp.minimum(next_q1, next_q2)
-    next_q -= jnp.exp(log_alpha) * next_log_probs
-    target_q = jax.lax.stop_gradient(reward + discount * gamma * next_q)
-    # target_q = jax.lax.stop_gradient(next_q - gamma * reward + gamma * discount * jnp.exp(log_alpha) * next_log_probs)
+    target_q = reward + discount * gamma * next_q
+    target_q -= jnp.exp(log_alpha) * next_log_probs
+    target_q = jax.lax.stop_gradient(target_q)
     # Calculate predicted Q
     last_conv = encoder_apply(params_critic['encoder'], state)
     q1, q2 = critic_apply(params_critic['critic'], last_conv, action)
@@ -132,7 +132,8 @@ def make_actor_loss_fn(encoder_apply, actor_apply, critic_apply):
                   log_alpha: jnp.ndarray, state: np.ndarray,
                   key) -> Tuple[jnp.ndarray, jnp.ndarray]:
     last_conv = jax.lax.stop_gradient(encoder_apply(params_critic['encoder'], state))
-    action, log_probs = actor_apply(params_actor, last_conv).sample_and_log_prob(key)
+    action, log_probs = actor_apply(params_actor,
+                                    last_conv).sample_and_log_prob(seed=key)
     q1, q2 = critic_apply(params_critic['critic'], last_conv, action)
     q = jnp.minimum(q1, q2)
     actor_loss = (log_probs * jnp.exp(log_alpha) - q).mean()
