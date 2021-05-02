@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 import distrax
 
+
 class MLP(hk.Module):
 
   def __init__(
@@ -58,16 +59,18 @@ class GaussianTanhTransformedHead:
   log_std: jnp.ndarray
 
   def sample(self, seed):
-    return reparameterize_gaussian_and_tanh(self.mean,
-                                            self.log_std,
-                                            seed,
-                                            return_log_pi=False)
+    base_dist = distrax.MultivariateNormalDiag(loc=self.mean,
+                                               scale_diag=jnp.exp(self.log_std))
+    return distrax.Transformed(distribution=base_dist,
+                               bijector=distrax.Block(distrax.Tanh(),
+                                                      1)).sample(seed=seed)
 
-  def sample_and_log_prob(self, key):
-    return reparameterize_gaussian_and_tanh(self.mean,
-                                            self.log_std,
-                                            key,
-                                            return_log_pi=True)
+  def sample_and_log_prob(self, seed):
+    base_dist = distrax.MultivariateNormalDiag(loc=self.mean,
+                                               scale_diag=jnp.exp(self.log_std))
+    return distrax.Transformed(distribution=base_dist,
+                               bijector=distrax.Block(distrax.Tanh(),
+                                                      1)).sample_and_log_prob(seed=seed)
 
   def mode(self):
     return jnp.tanh(self.mean)
@@ -112,11 +115,7 @@ class StateDependentGaussianPolicy(hk.Module):
             output_scale=jnp.sqrt(2.))(x)
     mean, log_std = jnp.split(x, 2, axis=1)
     log_std = jnp.clip(log_std, self.log_std_min, self.log_std_max)
-    base_dist = distrax.MultivariateNormalDiag(loc=mean,
-                                               scale_diag=jnp.exp(log_std)
-                                               * self.temperature)
-    return distrax.Transformed(distribution=base_dist,
-                               bijector=distrax.Block(distrax.Tanh(), 1))
+    return GaussianTanhTransformedHead(mean, log_std)
 
 
 class SACEncoder(hk.Module):

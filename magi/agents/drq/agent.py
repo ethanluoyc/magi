@@ -111,8 +111,8 @@ def make_critic_loss_fn(encoder_apply, actor_apply, critic_apply, gamma):
     next_q1, next_q2 = critic_apply(params_critic_target['critic'],
                                     next_last_conv_target, next_actions)
     next_q = jnp.minimum(next_q1, next_q2)
+    next_q -= jnp.exp(log_alpha) * next_log_probs
     target_q = reward + discount * gamma * next_q
-    target_q -= jnp.exp(log_alpha) * next_log_probs
     target_q = jax.lax.stop_gradient(target_q)
     # Calculate predicted Q
     last_conv = encoder_apply(params_critic['encoder'], state)
