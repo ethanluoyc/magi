@@ -190,6 +190,7 @@ class ContinuousQFunction(hk.Module):
           self.hidden_units,
           hidden_activation=nn.relu,
           hidden_scale=jnp.sqrt(2.),
+          output_scale=jnp.sqrt(2.)
       )(x)
 
     x = jnp.concatenate([s, a], axis=-1)
