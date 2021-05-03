@@ -5,13 +5,15 @@ from absl import flags
 import acme
 from acme import specs
 from acme import wrappers
-from acme.wrappers import gym_wrapper
+from dm_control import suite
+from dm_control.suite.wrappers import pixels
 import numpy as np
 
 from magi.agents import drq
 from magi.agents.drq import networks
 from magi.agents.drq.agent import DrQConfig
-from magi.agents.sac_ae.environment import make_dmc_env
+from magi.agents.drq.wrappers import FrameStackingWrapper
+from magi.agents.drq.wrappers import TakeKeyWrapper
 from magi.utils import loggers
 
 FLAGS = flags.FLAGS
@@ -25,29 +27,33 @@ flags.DEFINE_integer('num_steps', int(1e6), '')
 flags.DEFINE_integer('eval_freq', 5000, '')
 flags.DEFINE_integer('eval_episodes', 10, '')
 flags.DEFINE_integer('frame_stack', 3, '')
-flags.DEFINE_integer('action_repeat', 4, '')
+flags.DEFINE_integer('action_repeat', None, '')
 flags.DEFINE_integer('max_replay_size', 100_000, 'Minimum replay size')
 flags.DEFINE_integer('batch_size', 128, 'Batch size')
 flags.DEFINE_integer('seed', 42, 'Random seed.')
 
+PLANET_ACTION_REPEAT = {
+    'cartpole-swingup': 8,
+    'reacher-easy': 4,
+    'cheetah-run': 4,
+    'finger-spin': 2,
+    'ball_in_cup-catch': 4,
+    'walker-walk': 2
+}
+
 
 def load_env(domain_name, task_name, seed, frame_stack, action_repeat):
-  # TODO(yl): Remove make_dmc_env and construct environment from dm_control directly.
-  # env = make_dmc_env(domain_name,
-  #                    task_name,
-  #                    action_repeat,
-  #                    n_frames=frame_stack,
-  #                    image_size=84)
-  # env.seed(seed)
-  # return wrappers.SinglePrecisionWrapper(gym_wrapper.GymWrapper(env))
-  from dm_control import suite
-  from dm_control.suite.wrappers import pixels
-  from magi.agents.drq.wrappers import FrameStackingWrapper, TakeKeyWrapper
   env = suite.load(domain_name=domain_name,
                    task_name=task_name,
                    environment_kwargs={'flat_observation': True},
                    task_kwargs={'random': seed})
-  env = pixels.Wrapper(env, pixels_only=True, render_kwargs={'width': 84, 'height': 84, 'camera_id': 0})
+  env = pixels.Wrapper(env,
+                       pixels_only=True,
+                       render_kwargs={
+                           'width': 84,
+                           'height': 84,
+                           'camera_id': 0
+                       })
   env = wrappers.CanonicalSpecWrapper(env)
   env = TakeKeyWrapper(env, 'pixels')
   env = wrappers.ActionRepeatWrapper(env, action_repeat)
@@ -67,19 +73,28 @@ def main(_):
                name=experiment_name,
                config=FLAGS,
                dir=FLAGS.logdir)
+  if FLAGS.action_repeat is None:
+    action_repeat = PLANET_ACTION_REPEAT.get(f'{FLAGS.domain_name}-{FLAGS.task_name}',
+                                             None)
+    if action_repeat is None:
+      print('Unable to find action repeat configuration from PlaNet, default to 2')
+      action_repeat = 2
+  else:
+    action_repeat = FLAGS.action_repeat
   env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed, FLAGS.frame_stack,
-                 FLAGS.action_repeat)
+                 action_repeat)
   test_env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed + 42,
-                      FLAGS.frame_stack, FLAGS.action_repeat)
+                      FLAGS.frame_stack, action_repeat)
   spec = specs.make_environment_spec(env)
   network_spec = networks.make_default_networks(spec)
 
   agent = drq.DrQAgent(environment_spec=spec,
                        networks=network_spec,
-                       config=DrQConfig(max_replay_size=FLAGS.max_replay_size,
-                                        batch_size=FLAGS.batch_size,
-                                        temperature_adam_b1=0.9,
-                                        ),
+                       config=DrQConfig(
+                           max_replay_size=FLAGS.max_replay_size,
+                           batch_size=FLAGS.batch_size,
+                           temperature_adam_b1=0.9,
+                       ),
                        seed=FLAGS.seed,
                        logger=loggers.make_logger(label='learner',
                                                   time_delta=60.,
