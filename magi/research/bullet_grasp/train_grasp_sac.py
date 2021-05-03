@@ -40,8 +40,8 @@ class GraspNetTorso(hk.Module):
     h = jax.nn.relu(hk.Conv2D(32, (3, 3), stride=2)(observation))
     h = jax.nn.relu(hk.Conv2D(32, (3, 3), stride=2)(h))
     h = hk.Conv2D(32, (3, 3), stride=1)(h)
-    h = jax.nn.relu(hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(h))
-    output = hk.Flatten()(h)
+    h = hk.Flatten()(h)
+    output = jax.nn.relu(hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(h))
     if expand_obs:
       output = jnp.squeeze(output, 0)
     return output
@@ -105,7 +105,7 @@ def evaluate(actor, env, num_episodes=200):
   episode_lengths = []
   episode_returns = []
 
-  for i in range(num_episodes):
+  for _ in range(num_episodes):
     ep_step = 0
     ep_ret = 0
     timestep = env.reset()
@@ -118,10 +118,6 @@ def evaluate(actor, env, num_episodes=200):
       ep_ret += timestep.reward
     episode_lengths.append(ep_step)
     episode_returns.append(ep_ret)
-  # all_probs = np.asarray(jnp.stack(all_probs, axis=-1))
-  # fig, ax = plt.subplots(figsize=(12, 2))
-  # ax.pcolormesh(all_probs[:, :162], cmap="Blues")
-  # plt.close(fig)
   return {
       "eval_average_episode_length": np.mean(episode_lengths),
       "eval_average_episode_return": np.mean(episode_returns),
