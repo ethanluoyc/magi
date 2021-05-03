@@ -1,41 +1,54 @@
 from dataclasses import dataclass
-import math
 from typing import Sequence
 
 import haiku as hk
 import jax
-from jax import nn
 import jax.numpy as jnp
 import numpy as np
 import distrax
 
+# class MLP(hk.Module):
+
+#   def __init__(self,
+#                output_dim,
+#                hidden_units,
+#                hidden_activation=nn.relu,
+#                output_activation=None,
+#                hidden_scale=1.0,
+#                output_scale=1.0,
+#                name=None):
+#     super().__init__(name=name)
+#     self.output_dim = output_dim
+#     self.hidden_units = hidden_units
+#     self.hidden_activation = hidden_activation
+#     self.output_activation = output_activation
+#     self.hidden_kwargs = {"w_init": hk.initializers.Orthogonal(scale=hidden_scale)}
+#     self.output_kwargs = {"w_init": hk.initializers.Orthogonal(scale=output_scale)}
+
+#   def __call__(self, x):
+#     for unit in self.hidden_units:
+#       x = hk.Linear(unit, **self.hidden_kwargs)(x)
+#       x = self.hidden_activation(x)
+#     x = hk.Linear(self.output_dim, **self.output_kwargs)(x)
+#     if self.output_activation is not None:
+#       x = self.output_activation(x)
+#     return x
+
 
 class MLP(hk.Module):
+  hidden_dims: Sequence[int]
+  activate_final: int = False
 
-  def __init__(
-      self,
-      output_dim,
-      hidden_units,
-      hidden_activation=nn.relu,
-      output_activation=None,
-      hidden_scale=1.0,
-      output_scale=1.0,
-  ):
-    super().__init__()
-    self.output_dim = output_dim
-    self.hidden_units = hidden_units
-    self.hidden_activation = hidden_activation
-    self.output_activation = output_activation
-    self.hidden_kwargs = {"w_init": hk.initializers.Orthogonal(scale=hidden_scale)}
-    self.output_kwargs = {"w_init": hk.initializers.Orthogonal(scale=output_scale)}
+  def __init__(self, hidden_dims, activate_final=False, name=None):
+    super().__init__(name=name)
+    self.hidden_dims = hidden_dims
+    self.activate_final = activate_final
 
-  def __call__(self, x):
-    for unit in self.hidden_units:
-      x = hk.Linear(unit, **self.hidden_kwargs)(x)
-      x = self.hidden_activation(x)
-    x = hk.Linear(self.output_dim, **self.output_kwargs)(x)
-    if self.output_activation is not None:
-      x = self.output_activation(x)
+  def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+    for i, size in enumerate(self.hidden_dims):
+      x = hk.Linear(size, w_init=hk.initializers.Orthogonal(scale=jnp.sqrt(2.)))(x)
+      if i + 1 < len(self.hidden_dims) or self.activate_final:
+        x = jax.nn.relu(x)
     return x
 
 
@@ -76,17 +89,6 @@ class GaussianTanhTransformedHead:
     return jnp.tanh(self.mean)
 
 
-@jax.jit
-def gaussian_log_prob(
-    log_std: jnp.ndarray,
-    noise: jnp.ndarray,
-) -> jnp.ndarray:
-  """
-    Calculate log probabilities of gaussian distributions.
-    """
-  return -0.5 * (jnp.square(noise) + 2 * log_std + jnp.log(2 * math.pi))
-
-
 class StateDependentGaussianPolicy(hk.Module):
   """
     Policy for SAC.
@@ -95,25 +97,24 @@ class StateDependentGaussianPolicy(hk.Module):
   def __init__(self,
                action_size,
                hidden_units=(256, 256),
-               log_std_min=-20.0,
+               log_std_min=-10.0,
                log_std_max=2.0,
-               clip_log_std=True,
-               temperature=1.0):
+               clip_log_std=True):
     super().__init__()
     self.action_size = action_size
     self.hidden_units = hidden_units
     self.log_std_min = log_std_min
     self.log_std_max = log_std_max
     self.clip_log_std = clip_log_std
-    self.temperature = temperature
 
   def __call__(self, x):
-    x = MLP(2 * self.action_size,
-            self.hidden_units,
-            hidden_activation=nn.relu,
-            hidden_scale=jnp.sqrt(2.),
-            output_scale=jnp.sqrt(2.))(x)
-    mean, log_std = jnp.split(x, 2, axis=1)
+    x = MLP(hidden_dims=self.hidden_units, activate_final=True)(x)
+    mean_linear = hk.Linear(self.action_size,
+                            w_init=hk.initializers.Orthogonal(jnp.sqrt(2.)))
+    log_std_linear = hk.Linear(self.action_size,
+                               w_init=hk.initializers.Orthogonal(jnp.sqrt(2.)))
+    mean = mean_linear(x)
+    log_std = log_std_linear(x)
     log_std = jnp.clip(log_std, self.log_std_min, self.log_std_max)
     return GaussianTanhTransformedHead(mean, log_std)
 
@@ -167,7 +168,8 @@ class SACLinear(hk.Module):
 
   def __call__(self, x):
     x = hk.Linear(self.feature_dim)(x)
-    x = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(x)
+    # Default epsilon different from flax
+    x = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True, eps=1e-6)(x)
     x = jnp.tanh(x)
     return x
 
@@ -185,17 +187,11 @@ class ContinuousQFunction(hk.Module):
   def __call__(self, s, a):
 
     def _fn(x):
-      return MLP(
-          1,
-          self.hidden_units,
-          hidden_activation=nn.relu,
-          hidden_scale=jnp.sqrt(2.),
-          output_scale=jnp.sqrt(2.)
-      )(x)
+      return MLP(hidden_dims=self.hidden_units + (1,))(x).squeeze(-1)
 
     x = jnp.concatenate([s, a], axis=-1)
     # Return list even if num_critics == 1 for simple implementation.
-    return [_fn(x).squeeze(-1) for _ in range(self.num_critics)]
+    return [_fn(x) for _ in range(self.num_critics)]
 
 
 def make_default_networks(

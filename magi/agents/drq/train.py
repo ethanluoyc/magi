@@ -33,13 +33,27 @@ flags.DEFINE_integer('seed', 42, 'Random seed.')
 
 def load_env(domain_name, task_name, seed, frame_stack, action_repeat):
   # TODO(yl): Remove make_dmc_env and construct environment from dm_control directly.
-  env = make_dmc_env(domain_name,
-                     task_name,
-                     action_repeat,
-                     n_frames=frame_stack,
-                     image_size=84)
-  env.seed(seed)
-  return wrappers.SinglePrecisionWrapper(gym_wrapper.GymWrapper(env))
+  # env = make_dmc_env(domain_name,
+  #                    task_name,
+  #                    action_repeat,
+  #                    n_frames=frame_stack,
+  #                    image_size=84)
+  # env.seed(seed)
+  # return wrappers.SinglePrecisionWrapper(gym_wrapper.GymWrapper(env))
+  from dm_control import suite
+  from dm_control.suite.wrappers import pixels
+  from magi.agents.drq.wrappers import FrameStackingWrapper, TakeKeyWrapper
+  env = suite.load(domain_name=domain_name,
+                   task_name=task_name,
+                   environment_kwargs={'flat_observation': True},
+                   task_kwargs={'random': seed})
+  env = pixels.Wrapper(env, pixels_only=True, render_kwargs={'width': 84, 'height': 84, 'camera_id': 0})
+  env = wrappers.CanonicalSpecWrapper(env)
+  env = TakeKeyWrapper(env, 'pixels')
+  env = wrappers.ActionRepeatWrapper(env, action_repeat)
+  env = FrameStackingWrapper(env, num_frames=frame_stack)
+  env = wrappers.SinglePrecisionWrapper(env)
+  return env
 
 
 def main(_):
@@ -55,7 +69,7 @@ def main(_):
                dir=FLAGS.logdir)
   env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed, FLAGS.frame_stack,
                  FLAGS.action_repeat)
-  test_env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed + 1000,
+  test_env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed + 42,
                       FLAGS.frame_stack, FLAGS.action_repeat)
   spec = specs.make_environment_spec(env)
   network_spec = networks.make_default_networks(spec)
@@ -68,7 +82,7 @@ def main(_):
                                         ),
                        seed=FLAGS.seed,
                        logger=loggers.make_logger(label='learner',
-                                                  time_delta=60,
+                                                  time_delta=60.,
                                                   use_wandb=FLAGS.wandb))
   eval_actor = agent.make_actor(is_eval=True)
 

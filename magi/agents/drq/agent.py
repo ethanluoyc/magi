@@ -1,7 +1,9 @@
 import dataclasses
 from functools import partial
 import time
-from typing import Any, List, Mapping, Optional, Tuple
+from typing import Any, List, Mapping, Optional, Tuple, Iterator
+
+from acme import types
 
 from acme.adders import reverb as adders
 from acme import core
@@ -19,6 +21,7 @@ import numpy as np
 import optax
 import reverb
 from reverb import rate_limiters
+from reverb.replay_sample import ReplaySample
 import tensorflow_probability
 
 from magi.agents import actors
@@ -47,29 +50,35 @@ def soft_update(
 # Loss functions
 def make_critic_loss_fn(encoder_apply, actor_apply, critic_apply, gamma):
 
-  def _loss_critic(params_critic: hk.Params, params_critic_target: hk.Params,
-                   params_actor: hk.Params, log_alpha: jnp.ndarray, state: np.ndarray,
-                   action: np.ndarray, reward: np.ndarray, discount: np.ndarray,
-                   next_state: np.ndarray, weight: np.ndarray or List[jnp.ndarray],
-                   key) -> Tuple[jnp.ndarray, jnp.ndarray]:
-    next_last_conv = jax.lax.stop_gradient(
-        encoder_apply(params_critic['encoder'], next_state))
-    next_dist = actor_apply(params_actor, next_last_conv)
+  def _loss_critic(params_critic: hk.Params, key: jnp.ndarray,
+                   params_critic_target: hk.Params, params_actor: hk.Params,
+                   log_alpha: jnp.ndarray, batch: reverb.ReplaySample):
+    data: types.Transition = batch.data
+    next_features = jax.lax.stop_gradient(
+        encoder_apply(params_critic['encoder'], data.next_observation))
+    next_dist = actor_apply(params_actor, next_features)
     next_actions, next_log_probs = next_dist.sample_and_log_prob(seed=key)
+    assert len(next_log_probs.shape) == 1
 
     # Calculate q target values
-    next_last_conv_target = encoder_apply(params_critic_target['encoder'], next_state)
+    next_last_conv_target = encoder_apply(params_critic_target['encoder'],
+                                          data.next_observation)
     next_q1, next_q2 = critic_apply(params_critic_target['critic'],
                                     next_last_conv_target, next_actions)
     next_q = jnp.minimum(next_q1, next_q2)
     next_q -= jnp.exp(log_alpha) * next_log_probs
-    target_q = reward + discount * gamma * next_q
+    target_q = data.reward + data.discount * gamma * next_q
     target_q = jax.lax.stop_gradient(target_q)
+    assert len(target_q.shape) == 1
+    assert len(next_q1.shape) == 1
+    assert len(next_q2.shape) == 1
     # Calculate predicted Q
-    last_conv = encoder_apply(params_critic['encoder'], state)
-    q1, q2 = critic_apply(params_critic['critic'], last_conv, action)
+    features = encoder_apply(params_critic['encoder'], data.observation)
+    q1, q2 = critic_apply(params_critic['critic'], features, data.action)
+    assert len(q1.shape) == 1
+    assert len(q2.shape) == 1
     # abs_td = jnp.abs(target_q - q1)
-    loss_critic = (jnp.square(target_q - q1) + jnp.square(target_q - q2)).mean()
+    loss_critic = (jnp.square(target_q - q1) + jnp.square(target_q - q2)).mean(axis=0)
     return loss_critic, {'q1': q1.mean(), 'q2': q2.mean()}
 
   return _loss_critic
@@ -77,15 +86,19 @@ def make_critic_loss_fn(encoder_apply, actor_apply, critic_apply, gamma):
 
 def make_actor_loss_fn(encoder_apply, actor_apply, critic_apply):
 
-  def _loss_actor(params_actor: hk.Params, params_critic: hk.Params,
-                  log_alpha: jnp.ndarray, state: np.ndarray,
-                  key) -> Tuple[jnp.ndarray, jnp.ndarray]:
-    last_conv = jax.lax.stop_gradient(encoder_apply(params_critic['encoder'], state))
-    action, log_probs = actor_apply(params_actor,
-                                    last_conv).sample_and_log_prob(seed=key)
-    q1, q2 = critic_apply(params_critic['critic'], last_conv, action)
+  def _loss_actor(params_actor: hk.Params, key, params_critic: hk.Params,
+                  log_alpha: jnp.ndarray, batch: reverb.ReplaySample):
+    data: types.Transition = batch.data
+    last_conv = encoder_apply(params_critic['encoder'], data.observation)
+    assert len(last_conv.shape) == 2
+    actions, log_probs = actor_apply(params_actor,
+                                     last_conv).sample_and_log_prob(seed=key)
+    assert len(log_probs.shape) == 1
+    q1, q2 = critic_apply(params_critic['critic'], last_conv, actions)
+    assert len(q1.shape) == 1
+    assert len(q2.shape) == 1
     q = jnp.minimum(q1, q2)
-    actor_loss = (log_probs * jnp.exp(log_alpha) - q).mean()
+    actor_loss = (log_probs * jnp.exp(log_alpha) - q).mean(axis=0)
     entropy = -log_probs.mean()
     return actor_loss, {'log_probs': log_probs, 'entropy': entropy}
 
@@ -95,7 +108,8 @@ def make_actor_loss_fn(encoder_apply, actor_apply, critic_apply):
 def _loss_alpha(log_alpha: jnp.ndarray, log_probs: jnp.ndarray,
                 target_entropy) -> jnp.ndarray:
   temperature = jnp.exp(log_alpha)
-  return (temperature * (-log_probs - target_entropy)).mean(), {'alpha': temperature}
+  entropy = -log_probs.mean()
+  return temperature * (entropy - target_entropy), {'alpha': temperature}
 
 
 @dataclasses.dataclass
@@ -180,14 +194,15 @@ class DrQAgent(core.Actor, core.VariableSource):
     # Setup parameters and pure functions
     # Encoder.
     self._encoder = hk.without_apply_rng(hk.transform(networks['encoder']))
-    self._encoder_params = self._encoder_target_params = self._encoder.init(
-        next(self._rng), example_obs)
+    self._encoder_params = self._encoder.init(next(self._rng), example_obs)
+    self._encoder_target_params = jax.tree_map(lambda x: x.copy(), self._encoder_params)
     example_last_conv = self._encoder.apply(self._encoder_params, example_obs)
 
     # Critic from latent to Q values
     self._critic = hk.without_apply_rng(hk.transform(networks['critic']))
-    self._critic_params = self._critic_target_params = self._critic.init(
-        next(self._rng), example_last_conv, example_action)
+    self._critic_params = self._critic.init(next(self._rng), example_last_conv,
+                                            example_action)
+    self._critic_target_params = jax.tree_map(lambda x: x.copy(), self._critic_params)
 
     # Actor.
     self._actor = hk.without_apply_rng(hk.transform(networks['actor']))
@@ -206,45 +221,41 @@ class DrQAgent(core.Actor, core.VariableSource):
     self._opt_state_critic = self._opt_critic.init(self._params_entire_critic)
 
     # Setup losses
-    _critic_loss_fn = make_critic_loss_fn(self._encoder.apply, self._actor.apply,
-                                          self._critic.apply, config.discount)
-    _actor_loss_fn = make_actor_loss_fn(self._encoder.apply, self._actor.apply,
-                                        self._critic.apply)
+    critic_loss_fn = make_critic_loss_fn(self._encoder.apply, self._actor.apply,
+                                         self._critic.apply, config.discount)
+    actor_loss_fn = make_actor_loss_fn(self._encoder.apply, self._actor.apply,
+                                       self._critic.apply)
     target_entropy = -float(np.prod(environment_spec.actions.shape))
-    _alpha_loss_fn = partial(_loss_alpha, target_entropy=target_entropy)
+    alpha_loss_fn = partial(_loss_alpha, target_entropy=target_entropy)
 
     @jax.jit
     def _update_critic(critic_params, critic_opt_state, key, critic_target_params,
-                       actor_params, log_alpha, state, action, reward, discount,
-                       next_state, weight):
-      (loss,
-       aux), grad = jax.value_and_grad(_critic_loss_fn,
-                                       has_aux=True)(critic_params,
-                                                     critic_target_params, actor_params,
-                                                     log_alpha, state, action, reward,
-                                                     discount, next_state, weight, key)
+                       actor_params, log_alpha, batch):
+      loss_grad_fn = jax.value_and_grad(critic_loss_fn, has_aux=True)
+      (loss, aux), grad = loss_grad_fn(critic_params, key, critic_target_params,
+                                       actor_params, log_alpha, batch)
       update, new_opt_state = self._opt_critic.update(grad, critic_opt_state)
-      params_to_update = optax.apply_updates(critic_params, update)
-      return new_opt_state, params_to_update, loss, aux
+      new_params = optax.apply_updates(critic_params, update)
+      return new_opt_state, new_params, loss, aux
 
     @jax.jit
     def _update_actor(params_actor: hk.Params, actor_opt_state, key,
                       params_critic: hk.Params, log_alpha: jnp.ndarray,
-                      state: np.ndarray):
-      (loss, aux), grad = jax.value_and_grad(_actor_loss_fn,
-                                             has_aux=True)(params_actor, params_critic,
-                                                           log_alpha, state, key)
+                      batch: reverb.ReplaySample):
+      loss_grad_fn = jax.value_and_grad(actor_loss_fn, has_aux=True)
+      (loss, aux), grad = loss_grad_fn(params_actor, key, params_critic, log_alpha,
+                                       batch)
       update, new_opt_state = self._opt_actor.update(grad, actor_opt_state)
-      params_to_update = optax.apply_updates(params_actor, update)
-      return new_opt_state, params_to_update, loss, aux
+      new_params = optax.apply_updates(params_actor, update)
+      return new_opt_state, new_params, loss, aux
 
     @jax.jit
     def _update_alpha(log_alpha, alpha_opt_state, log_probs):
-      (loss, aux), grad = jax.value_and_grad(_alpha_loss_fn, has_aux=True)(log_alpha,
-                                                                           log_probs)
+      loss_grad_fn = jax.value_and_grad(alpha_loss_fn, has_aux=True)
+      (loss, aux), grad = loss_grad_fn(log_alpha, log_probs)
       update, new_opt_state = self._opt_alpha.update(grad, alpha_opt_state)
-      params_to_update = optax.apply_updates(log_alpha, update)
-      return new_opt_state, params_to_update, loss, aux
+      new_params = optax.apply_updates(log_alpha, update)
+      return new_opt_state, new_params, loss, aux
 
     self._update_critic = _update_critic
     self._update_actor = _update_actor
@@ -257,7 +268,6 @@ class DrQAgent(core.Actor, core.VariableSource):
         partial(soft_update, tau=config.critic_q_soft_update_rate))
 
     # Setup actors
-    self._client = variable_utils.VariableClient(self, '')
     # The adder is used to insert observations into replay.
     # discount is 1.0 as we are multiplying gamma during learner step
     adder = adders.NStepTransitionAdder(client=reverb.Client(address),
@@ -270,10 +280,11 @@ class DrQAgent(core.Actor, core.VariableSource):
 
     self._forward_fn = forward_fn
 
+    client = variable_utils.VariableClient(self, '')
     self._policy_actor = acting.SACActor(self._forward_fn,
                                          next(self._rng),
                                          is_eval=False,
-                                         variable_client=self._client,
+                                         variable_client=client,
                                          adder=adder)
     self._random_actor = actors.RandomActor(environment_spec.actions,
                                             next(self._rng),
@@ -302,26 +313,23 @@ class DrQAgent(core.Actor, core.VariableSource):
   def update(self, wait: bool = True):
     if not self._should_update():
       return
-    batch = next(self._iterator)
+    batch: reverb.ReplaySample = next(self._iterator)
     start = time.time()
-    transitions = jax.device_put(batch.data)
+    transitions = batch.data
+    # data: types.Transition
     state = batched_random_crop(next(self._rng), transitions.observation)
     next_state = batched_random_crop(next(self._rng), transitions.next_observation)
-    action = transitions.action
-    reward = transitions.reward
-    discount = transitions.discount
-
-    # No PER for now
-    weight = jnp.ones_like(reward)
+    batch = ReplaySample(
+        batch.info, transitions._replace(observation=state,
+                                         next_observation=next_state))
 
     metrics = {}
     # Update critic.
-    self._opt_state_critic, params_entire_critic, loss_critic, critic_stats = self._update_critic(
+    self._opt_state_critic, new_params_entire_critic, loss_critic, critic_stats = self._update_critic(
         self._params_entire_critic, self._opt_state_critic, next(self._rng),
-        self._params_entire_critic_target, self._actor_params, self._log_alpha, state,
-        action, reward, discount, next_state, weight)
-    self._encoder_params = params_entire_critic['encoder']
-    self._critic_params = params_entire_critic['critic']
+        self._params_entire_critic_target, self._actor_params, self._log_alpha, batch)
+    self._encoder_params = new_params_entire_critic['encoder']
+    self._critic_params = new_params_entire_critic['critic']
     metrics.update(loss_critic=loss_critic, **critic_stats)
 
     # Update actor and alpha.
@@ -332,7 +340,7 @@ class DrQAgent(core.Actor, core.VariableSource):
           next(self._rng),
           self._params_entire_critic,
           self._log_alpha,
-          state,
+          batch,
       )
       self._opt_state_alpha, self._log_alpha, loss_alpha, alpha_stats = self._update_alpha(
           self._log_alpha,
@@ -346,10 +354,12 @@ class DrQAgent(core.Actor, core.VariableSource):
 
     # Update target network.
     if self._num_learning_steps % self._critic_target_update_frequency == 0:
-      self._encoder_target_params = self._update_encoder_target(
+      new_encoder_target_params = self._update_encoder_target(
           self._encoder_target_params, self._encoder_params)
-      self._critic_target_params = self._update_critic_target(
-          self._critic_target_params, self._critic_params)
+      new_critic_target_params = self._update_critic_target(self._critic_target_params,
+                                                            self._critic_params)
+      self._encoder_target_params = new_encoder_target_params
+      self._critic_target_params = new_critic_target_params
     self._policy_actor.update(wait=wait)
 
     self._num_learning_steps += 1
@@ -363,21 +373,22 @@ class DrQAgent(core.Actor, core.VariableSource):
     return [{'encoder': self._encoder_params, 'actor': self._actor_params}]
 
   def make_actor(self, is_eval=True):
+    client = variable_utils.VariableClient(self, '')
     return acting.SACActor(self._forward_fn,
                            next(self._rng),
                            is_eval=is_eval,
-                           variable_client=self._client)
+                           variable_client=client)
 
   @property
   def _params_entire_critic(self):
-    return {
+    return hk.data_structures.to_immutable_dict({
         'encoder': self._encoder_params,
         'critic': self._critic_params,
-    }
+    })
 
   @property
   def _params_entire_critic_target(self):
-    return {
+    return hk.data_structures.to_immutable_dict({
         'encoder': self._encoder_target_params,
         'critic': self._critic_target_params,
-    }
+    })
