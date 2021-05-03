@@ -62,13 +62,12 @@ def main(_):
                   critic=critic,
                   seed=FLAGS.seed,
                   logger=loggers.make_logger(label='learner',
-                                             time_delta=5.,
+                                             log_frequency=1000,
                                              use_wandb=FLAGS.wandb))
 
   loop = acme.EnvironmentLoop(env,
                               algo,
                               logger=loggers.make_logger(label='environment_loop',
-                                                         time_delta=5.,
                                                          use_wandb=FLAGS.wandb))
   loop.run(num_steps=FLAGS.num_steps)
   if FLAGS.wandb:

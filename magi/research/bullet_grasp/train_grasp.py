@@ -154,7 +154,7 @@ def main(_):
                   critic=critic,
                   seed=FLAGS.seed,
                   logger=loggers.make_logger(label='learner',
-                                             time_delta=5.,
+                                             log_frequency=500,
                                              use_wandb=FLAGS.wandb),
                   start_steps=FLAGS.min_num_steps,
                   batch_size=FLAGS.batch_size)
@@ -162,11 +162,9 @@ def main(_):
   loop = acme.EnvironmentLoop(env,
                               algo,
                               logger=loggers.make_logger(label='environment_loop',
-                                                         time_delta=5.,
                                                          use_wandb=FLAGS.wandb),
                               counter=counter)
   eval_logger = loggers.make_logger(label='evaluation',
-                                    time_delta=0,
                                     use_wandb=FLAGS.wandb)
   for _ in range(FLAGS.num_steps // FLAGS.eval_every):
     loop.run(num_steps=FLAGS.eval_every)

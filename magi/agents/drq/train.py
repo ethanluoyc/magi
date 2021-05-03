@@ -12,8 +12,8 @@ import numpy as np
 from magi.agents import drq
 from magi.agents.drq import networks
 from magi.agents.drq.agent import DrQConfig
-from magi.agents.drq.wrappers import FrameStackingWrapper
-from magi.agents.drq.wrappers import TakeKeyWrapper
+from magi.utils.wrappers import FrameStackingWrapper
+from magi.utils.wrappers import TakeKeyWrapper
 from magi.utils import loggers
 
 FLAGS = flags.FLAGS
@@ -97,19 +97,17 @@ def main(_):
                        ),
                        seed=FLAGS.seed,
                        logger=loggers.make_logger(label='learner',
-                                                  time_delta=60.,
+                                                  log_frequency=1000,
                                                   use_wandb=FLAGS.wandb))
   eval_actor = agent.make_actor(is_eval=True)
 
   loop = acme.EnvironmentLoop(env,
                               agent,
                               logger=loggers.make_logger(label='environment_loop',
-                                                         time_delta=5.,
                                                          use_wandb=FLAGS.wandb))
   eval_loop = acme.EnvironmentLoop(test_env,
                                    eval_actor,
                                    logger=loggers.make_logger(label='eval',
-                                                              time_delta=0,
                                                               use_wandb=FLAGS.wandb))
   for _ in range(FLAGS.num_steps // FLAGS.eval_freq):
     loop.run(num_steps=FLAGS.eval_freq)

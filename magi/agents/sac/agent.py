@@ -1,14 +1,14 @@
 """Soft Actor-Critic implementation"""
 from functools import partial
-from typing import Iterator, List, Optional, Sequence, Tuple
+from typing import Iterator, Optional, Sequence
 
-from acme.adders import reverb as adders
 from acme import core
 from acme import datasets
+from acme import specs
+from acme.adders import reverb as adders
 from acme.jax import networks as network_lib
 from acme.jax import utils
 from acme.jax import variable_utils
-from acme import specs
 from acme.utils import counting
 from acme.utils import loggers
 import dm_env
@@ -22,6 +22,7 @@ from reverb import rate_limiters
 
 from magi.agents import actors
 from magi.agents.sac import acting as acting_lib
+from magi.agents.sac import losses
 
 
 def heuristic_target_entropy(action_spec):
@@ -91,43 +92,47 @@ class SACLearner(core.Learner, core.VariableSource):
     self.opt_state_alpha = opt_init(self.log_alpha)
 
     @jax.jit
-    def _update_actor(params_actor, opt_state, key, params_critic, log_alpha, state):
-      (loss, aux), grad = jax.value_and_grad(self._loss_actor,
-                                             has_aux=True)(params_actor, params_critic,
-                                                           log_alpha, state, key)
+    def _update_actor(params_actor, opt_state, key, params_critic, log_alpha,
+                      observation):
+
+      def loss_fn(actor_params):
+        return losses.actor_loss_fn(self.actor, self.critic, actor_params, key,
+                                    params_critic, log_alpha, observation)
+
+      (loss, aux), grad = jax.value_and_grad(loss_fn, has_aux=True)(params_actor)
       update, opt_state = self.opt_actor(grad, opt_state)
       params_actor = optax.apply_updates(params_actor, update)
       return params_actor, opt_state, loss, aux
 
     @jax.jit
-    def _update_critic(
-        params_critic,
-        opt_state,
-        key,
-        params_critic_target,
-        params_actor,
-        log_alpha,
-        state,
-        action,
-        reward,
-        discount,
-        next_state,
-        weight,
-    ):
-      (loss,
-       aux), grad = jax.value_and_grad(self._loss_critic,
-                                       has_aux=True)(params_critic,
-                                                     params_critic_target, params_actor,
-                                                     log_alpha, state, action, reward,
-                                                     discount, next_state, weight, key)
+    def _update_critic(params_critic, opt_state, key, critic_target_params,
+                       actor_params, log_alpha, batch):
+
+      def loss_fn(critic_params):
+        return losses.critic_loss_fn(self.actor,
+                                     self.critic,
+                                     critic_params,
+                                     key,
+                                     critic_target_params,
+                                     actor_params,
+                                     log_alpha,
+                                     batch,
+                                     gamma=self._gamma)
+
+      (loss, aux), grad = jax.value_and_grad(loss_fn, has_aux=True)(params_critic)
       update, opt_state = self.opt_critic(grad, opt_state)
       params_critic = optax.apply_updates(params_critic, update)
       return params_critic, opt_state, loss, aux
 
     @jax.jit
-    def _update_alpha(log_alpha, opt_state, mean_log_pi):
-      (loss, aux), grad = jax.value_and_grad(self._loss_alpha,
-                                             has_aux=True)(log_alpha, mean_log_pi)
+    def _update_alpha(log_alpha, opt_state, entropy):
+
+      def loss_fn(log_alpha):
+        return losses.alpha_loss_fn(log_alpha,
+                                    entropy,
+                                    target_entropy=self.target_entropy)
+
+      (loss, aux), grad = jax.value_and_grad(loss_fn, has_aux=True)(log_alpha)
       update, opt_state = self.opt_alpha(grad, opt_state)
       log_alpha = optax.apply_updates(log_alpha, update)
       return log_alpha, opt_state, loss, aux
@@ -137,59 +142,30 @@ class SACLearner(core.Learner, core.VariableSource):
     self._update_alpha = _update_alpha
     self._update_target = jax.jit(partial(optax.incremental_update, step_size=tau))
 
-  @partial(jax.jit, static_argnums=0)
-  def _calculate_loss_critic_and_abs_td(
-      self,
-      value_list: List[jnp.ndarray],
-      target: jnp.ndarray,
-      weight: np.ndarray,
-  ) -> jnp.ndarray:
-    abs_td = jnp.abs(target - value_list[0])
-    loss_critic = (jnp.square(abs_td) * weight).mean()
-    for value in value_list[1:]:
-      loss_critic += (jnp.square(target - value) * weight).mean()
-    return loss_critic, jax.lax.stop_gradient(abs_td)
-
   def step(self):
     batch = next(self._iterator)
-    transitions = batch.data
-    state = transitions.observation
-    next_state = transitions.next_observation
-    action = transitions.action
-    reward = transitions.reward
-    discount = transitions.discount
-
-    # No PER for now
-    weight = jnp.ones_like(reward)
-    discount = discount * self._gamma
 
     # Update critic.
     self.params_critic, self.opt_state_critic, loss_critic, _ = self._update_critic(
         self.params_critic,
         self.opt_state_critic,
         key=next(self._rng),
-        params_critic_target=self.params_critic_target,
-        params_actor=self.params_actor,
+        critic_target_params=self.params_critic_target,
+        actor_params=self.params_actor,
         log_alpha=self.log_alpha,
-        state=state,
-        action=action,
-        reward=reward,
-        discount=discount,
-        next_state=next_state,
-        weight=weight,
-    )
+        batch=batch)
     # Update actor
-    self.params_actor, self.opt_state_actor, loss_actor, mean_log_pi = (
+    self.params_actor, self.opt_state_actor, loss_actor, actor_stats = (
         self._update_actor(self.params_actor,
                            self.opt_state_actor,
                            key=next(self._rng),
                            params_critic=self.params_critic,
                            log_alpha=self.log_alpha,
-                           state=state))
+                           observation=batch.data.observation))
     self.log_alpha, self.opt_state_alpha, loss_alpha, _ = self._update_alpha(
         self.log_alpha,
         self.opt_state_alpha,
-        mean_log_pi=mean_log_pi,
+        entropy=actor_stats['entropy'],
     )
     self._counter.increment(steps=1)
     results = {
@@ -202,66 +178,6 @@ class SACLearner(core.Learner, core.VariableSource):
     # Update target network.
     self.params_critic_target = self._update_target(self.params_critic,
                                                     self.params_critic_target)
-
-  @partial(jax.jit, static_argnums=0)
-  def _calculate_target(
-      self,
-      params_critic_target: hk.Params,
-      log_alpha: jnp.ndarray,
-      reward: np.ndarray,
-      discount: np.ndarray,
-      next_state: np.ndarray,
-      next_action: jnp.ndarray,
-      next_log_pi: jnp.ndarray,
-  ) -> jnp.ndarray:
-    next_qs = jnp.stack(self.critic.apply(params_critic_target, next_state,
-                                          next_action)).min(axis=0)
-    next_q = next_qs - jnp.exp(log_alpha) * next_log_pi
-    assert len(next_q.shape) == 1
-    assert len(reward.shape) == 1
-    return jax.lax.stop_gradient(reward + discount * next_q)
-
-  @partial(jax.jit, static_argnums=0)
-  def _loss_critic(self, params_critic: hk.Params, params_critic_target: hk.Params,
-                   params_actor: hk.Params, log_alpha: jnp.ndarray, state: np.ndarray,
-                   action: np.ndarray, reward: np.ndarray, discount: np.ndarray,
-                   next_state: np.ndarray, weight: np.ndarray or List[jnp.ndarray],
-                   key) -> Tuple[jnp.ndarray, jnp.ndarray]:
-    # next_action, next_log_pi = self._sample_action(params_actor, next_state, key)
-    next_action_dist = self.actor.apply(params_actor, state)
-    next_action = next_action_dist.sample(seed=key)
-    next_log_pi = next_action_dist.log_prob(next_action)
-    target = self._calculate_target(params_critic_target, log_alpha, reward, discount,
-                                    next_state, next_action, next_log_pi)
-    q_list = self.critic.apply(params_critic, state, action)
-    abs_td = jnp.abs(target - q_list[0])
-    loss = (jnp.square(abs_td) * weight).mean()
-    for value in q_list[1:]:
-      loss += (jnp.square(target - value) * weight).mean()
-    return loss, jax.lax.stop_gradient(abs_td)
-
-  @partial(jax.jit, static_argnums=0)
-  def _loss_actor(self, params_actor: hk.Params, params_critic: hk.Params,
-                  log_alpha: jnp.ndarray, state: np.ndarray,
-                  key) -> Tuple[jnp.ndarray, jnp.ndarray]:
-    action_dist = self.actor.apply(params_actor, state)
-    action = action_dist.sample(seed=key)
-    log_pi = action_dist.log_prob(action)
-
-    mean_q = jnp.stack(self.critic.apply(params_critic, state,
-                                         action)).min(axis=0).mean()
-    mean_log_pi = log_pi.mean()
-    return jax.lax.stop_gradient(
-        jnp.exp(log_alpha)) * mean_log_pi - mean_q, jax.lax.stop_gradient(mean_log_pi)
-
-  @partial(jax.jit, static_argnums=0)
-  def _loss_alpha(
-      self,
-      log_alpha: jnp.ndarray,
-      mean_log_pi: jnp.ndarray,
-  ) -> jnp.ndarray:
-    # TODO(yl): Investigate if it should be log_alpha or exp(log_alpha)
-    return -jnp.exp(log_alpha) * (self.target_entropy + mean_log_pi), None
 
   def get_variables(self, names):
     del names
