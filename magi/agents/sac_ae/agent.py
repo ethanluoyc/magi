@@ -122,7 +122,7 @@ def make_actor_loss_fn(encoder_apply, actor_apply, linear_apply, critic_apply):
 
     feature = linear_apply(params_critic['linear'], last_conv)
     q1, q2 = critic_apply(params_critic['critic'], feature, action)
-    q = jnp.minimum(q1, q2).mean()
+    q = jnp.minimum(q1, q2)
     entropy = -log_pi.mean()
     return (jnp.exp(log_alpha) * log_pi - q).mean(), entropy
 
