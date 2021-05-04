@@ -13,13 +13,13 @@ def alpha_loss_fn(log_alpha: jnp.ndarray, entropy: jnp.ndarray,
 
 
 def actor_loss_fn(actor, critic, actor_params: hk.Params, key, critic_params: hk.Params,
-                  log_alpha: jnp.ndarray, state: jnp.ndarray):
+                  log_alpha: jnp.ndarray, observation: jnp.ndarray):
   "Compute the soft actor loss in SAC."
-  action_dist = actor.apply(actor_params, state)
+  action_dist = actor.apply(actor_params, observation)
   actions = action_dist.sample(seed=key)
   log_probs = action_dist.log_prob(actions)
 
-  q1, q2 = critic.apply(critic_params, state, actions)
+  q1, q2 = critic.apply(critic_params, observation, actions)
   q = jnp.minimum(q1, q2)
   entropy = -log_probs.mean()
   actor_loss = jnp.exp(log_alpha) * log_probs - q

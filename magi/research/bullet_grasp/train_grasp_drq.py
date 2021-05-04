@@ -13,6 +13,7 @@ from magi.agents.drq import networks
 from magi.agents.drq.agent import DrQConfig
 from magi.experimental.environments import bullet_kuka_env
 from magi.utils import loggers
+from magi.research.bullet_grasp import utils
 
 FLAGS = flags.FLAGS
 flags.DEFINE_bool('wandb', False, 'whether to log result to wandb')
@@ -41,29 +42,6 @@ def load_env(seed):
   env.seed(seed)
   env = gym_wrapper.GymWrapper(env)
   return env
-
-
-def evaluate(actor, env, num_episodes=200):
-  actor.update(wait=True)
-  episode_lengths = []
-  episode_returns = []
-
-  for _ in range(num_episodes):
-    ep_step = 0
-    ep_ret = 0
-    timestep = env.reset()
-    actor.observe_first(timestep)
-    while not timestep.last():
-      action = actor.select_action(timestep.observation)
-      timestep = env.step(action)
-      ep_step += 1
-      ep_ret += timestep.reward
-    episode_lengths.append(ep_step)
-    episode_returns.append(ep_ret)
-  return {
-      'eval_average_episode_length': np.mean(episode_lengths),
-      'eval_average_episode_return': np.mean(episode_returns),
-  }
 
 
 def main(_):
@@ -104,7 +82,7 @@ def main(_):
   eval_logger = loggers.make_logger(label='evaluation', use_wandb=FLAGS.wandb)
   for _ in range(FLAGS.num_steps // FLAGS.eval_freq):
     loop.run(num_steps=FLAGS.eval_freq)
-    eval_stats = evaluate(eval_actor, env)
+    eval_stats = utils.evaluate(eval_actor, env)
     eval_logger.write({**eval_stats, 'steps': counter.get_counts()['steps']})
   if FLAGS.wandb:
     wandb.finish()

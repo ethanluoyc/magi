@@ -359,7 +359,7 @@ class DrQAgent(core.Actor, core.VariableSource):
 
     state = self._state
     state, loss, critic_metrics = self._update_critic(state, next(self._rng), batch)
-    metrics = {"critic_loss": loss, **critic_metrics}
+    metrics = {'critic_loss': loss, **critic_metrics}
 
     # Update actor and alpha.
     if self._num_learning_steps % self._actor_update_frequency == 0:

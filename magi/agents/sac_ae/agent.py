@@ -150,12 +150,6 @@ def make_ae_loss_fn(encoder_apply, linear_apply, decoder_apply, lambda_latent,
   return _loss_ae
 
 
-def _loss_alpha(log_alpha: jnp.ndarray, entropy: jnp.ndarray,
-                target_entropy) -> jnp.ndarray:
-  temperature = jnp.exp(log_alpha)
-  return temperature * (entropy - target_entropy), ()
-
-
 @dataclasses.dataclass
 class SACAEConfig:
   """Configuration parameters for SAC-AE.
