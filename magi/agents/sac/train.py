@@ -5,7 +5,7 @@ from absl import flags
 import acme
 from acme import specs
 from acme import wrappers
-from dm_control import suite
+from dm_control import suite  # pytype: disable=import-error
 import haiku as hk
 import numpy as np
 
@@ -62,13 +62,12 @@ def main(_):
                   critic=critic,
                   seed=FLAGS.seed,
                   logger=loggers.make_logger(label='learner',
-                                             time_delta=5.,
+                                             log_frequency=1000,
                                              use_wandb=FLAGS.wandb))
 
   loop = acme.EnvironmentLoop(env,
                               algo,
                               logger=loggers.make_logger(label='environment_loop',
-                                                         time_delta=5.,
                                                          use_wandb=FLAGS.wandb))
   loop.run(num_steps=FLAGS.num_steps)
   if FLAGS.wandb:

@@ -32,13 +32,12 @@ class WandbLogger(base.Logger):
 
 
 def make_logger(label: str,
-                time_delta: float = 1.0,
+                log_frequency: int = 1,
                 asynchronous: bool = False,
                 print_fn=None,
                 serialize_fn=base.to_numpy,
                 steps_key: str = 'steps',
-                use_wandb=True,
-                wandb_log_every_n_steps=1):
+                use_wandb=True):
   """Make a default Acme logger.
 
   Args:
@@ -61,13 +60,13 @@ def make_logger(label: str,
 
   loggers = [terminal_logger]
   if use_wandb:
-    loggers.append(WandbLogger(label, log_every_n_steps=wandb_log_every_n_steps))
+    loggers.append(WandbLogger(label))
 
   # Dispatch to all writers and filter Nones and by time.
   logger = aggregators.Dispatcher(loggers, serialize_fn)
   logger = filters.NoneFilter(logger)
   if asynchronous:
     logger = async_logger.AsyncLogger(logger)
-  logger = filters.TimeFilter(logger, time_delta)
+  logger = filters.GatedFilter(logger, gating_fn=lambda t: t % log_frequency == 0)
 
   return logger

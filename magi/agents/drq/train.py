@@ -9,9 +9,9 @@ from dm_control import suite  # pytype: disable=import-error
 from dm_control.suite.wrappers import pixels  # pytype: disable=import-error
 import numpy as np
 
-from magi.agents import sac_ae
-from magi.agents.sac_ae.agent import SACAEConfig
-from magi.agents.sac_ae import networks
+from magi.agents import drq
+from magi.agents.drq.agent import DrQConfig
+from magi.agents.drq import networks
 from magi.utils import loggers
 from magi.utils.wrappers import FrameStackingWrapper
 from magi.utils.wrappers import TakeKeyWrapper
@@ -26,10 +26,11 @@ flags.DEFINE_string('logdir', './logs', '')
 flags.DEFINE_integer('num_steps', int(1e6), '')
 flags.DEFINE_integer('eval_freq', 5000, '')
 flags.DEFINE_integer('eval_episodes', 10, '')
-flags.DEFINE_integer('frame_stack', 3, 'Number of frames to stack')
-flags.DEFINE_integer('action_repeat', None, 'Number of action repeat')
-flags.DEFINE_integer('max_replay_size', int(100000), 'Maximum replay size')
-flags.DEFINE_integer('seed', 0, 'Random seed.')
+flags.DEFINE_integer('frame_stack', 3, '')
+flags.DEFINE_integer('action_repeat', None, '')
+flags.DEFINE_integer('max_replay_size', 100_000, 'Minimum replay size')
+flags.DEFINE_integer('batch_size', 128, 'Batch size')
+flags.DEFINE_integer('seed', 42, 'Random seed.')
 
 PLANET_ACTION_REPEAT = {
     'cartpole-swingup': 8,
@@ -65,7 +66,7 @@ def main(_):
   np.random.seed(FLAGS.seed)
   if FLAGS.wandb:
     import wandb  # pylint: disable=import-outside-toplevel
-    experiment_name = (f'sac_ae-{FLAGS.domain_name}-{FLAGS.task_name}_'
+    experiment_name = (f'drq-{FLAGS.domain_name}-{FLAGS.task_name}_'
                        f'{FLAGS.seed}_{int(time.time())}')
     wandb.init(project=FLAGS.wandb_project,
                entity=FLAGS.wandb_entity,
@@ -79,21 +80,25 @@ def main(_):
       print('Unable to find action repeat configuration from PlaNet, default to 2')
       action_repeat = 2
   else:
-    action_repeat = FLAGS.action_repea
+    action_repeat = FLAGS.action_repeat
   env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed, FLAGS.frame_stack,
                  action_repeat)
-  test_env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed + 1000,
+  test_env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed + 42,
                       FLAGS.frame_stack, action_repeat)
   spec = specs.make_environment_spec(env)
   network_spec = networks.make_default_networks(spec)
 
-  agent = sac_ae.SACAEAgent(environment_spec=spec,
-                            networks=network_spec,
-                            config=SACAEConfig(max_replay_size=FLAGS.max_replay_size),
-                            seed=FLAGS.seed,
-                            logger=loggers.make_logger(label='learner',
-                                                       log_frequency=1000,
-                                                       use_wandb=FLAGS.wandb))
+  agent = drq.DrQAgent(environment_spec=spec,
+                       networks=network_spec,
+                       config=DrQConfig(
+                           max_replay_size=FLAGS.max_replay_size,
+                           batch_size=FLAGS.batch_size,
+                           temperature_adam_b1=0.9,
+                       ),
+                       seed=FLAGS.seed,
+                       logger=loggers.make_logger(label='learner',
+                                                  log_frequency=1000,
+                                                  use_wandb=FLAGS.wandb))
   eval_actor = agent.make_actor(is_eval=True)
 
   loop = acme.EnvironmentLoop(env,

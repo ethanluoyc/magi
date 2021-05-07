@@ -6,3 +6,4 @@ tfp-nightly
 pandas
 wandb
 pybullet
+distrax

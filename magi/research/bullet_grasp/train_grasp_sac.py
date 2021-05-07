@@ -14,6 +14,7 @@ import numpy as np
 
 from magi.agents.sac.agent import SACAgent
 from magi.experimental.environments import bullet_kuka_env
+from magi.research.bullet_grasp import utils
 from magi.utils import loggers
 
 FLAGS = flags.FLAGS
@@ -40,8 +41,9 @@ class GraspNetTorso(hk.Module):
     h = jax.nn.relu(hk.Conv2D(32, (3, 3), stride=2)(observation))
     h = jax.nn.relu(hk.Conv2D(32, (3, 3), stride=2)(h))
     h = hk.Conv2D(32, (3, 3), stride=1)(h)
-    h = jax.nn.relu(hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(h))
-    output = hk.Flatten()(h)
+    h = hk.Flatten()(h)
+    output = jax.nn.relu(
+        hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(h))
     if expand_obs:
       output = jnp.squeeze(output, 0)
     return output
@@ -100,34 +102,6 @@ def load_env(seed):
   return env
 
 
-def evaluate(actor, env, num_episodes=200):
-  actor.update(wait=True)
-  episode_lengths = []
-  episode_returns = []
-
-  for i in range(num_episodes):
-    ep_step = 0
-    ep_ret = 0
-    timestep = env.reset()
-    actor.observe_first(actor)
-    while not timestep.last():
-      if i == 0:
-        action = actor.select_action(timestep.observation)
-      timestep = env.step(action)
-      ep_step += 1
-      ep_ret += timestep.reward
-    episode_lengths.append(ep_step)
-    episode_returns.append(ep_ret)
-  # all_probs = np.asarray(jnp.stack(all_probs, axis=-1))
-  # fig, ax = plt.subplots(figsize=(12, 2))
-  # ax.pcolormesh(all_probs[:, :162], cmap="Blues")
-  # plt.close(fig)
-  return {
-      "eval_average_episode_length": np.mean(episode_lengths),
-      "eval_average_episode_return": np.mean(episode_returns),
-  }
-
-
 def main(_):
   np.random.seed(FLAGS.seed)
   if FLAGS.wandb:
@@ -149,32 +123,30 @@ def main(_):
   policy = hk.without_apply_rng(hk.transform(policy_fn, apply_rng=True))
   critic = hk.without_apply_rng(hk.transform(critic_fn, apply_rng=True))
 
-  algo = SACAgent(environment_spec=spec,
-                  policy=policy,
-                  critic=critic,
-                  seed=FLAGS.seed,
-                  logger=loggers.make_logger(label='learner',
-                                             time_delta=5.,
-                                             use_wandb=FLAGS.wandb),
-                  start_steps=FLAGS.min_num_steps,
-                  batch_size=FLAGS.batch_size)
+  agent = SACAgent(environment_spec=spec,
+                   policy=policy,
+                   critic=critic,
+                   seed=FLAGS.seed,
+                   logger=loggers.make_logger(label='learner',
+                                              log_frequency=500,
+                                              use_wandb=FLAGS.wandb),
+                   initial_num_steps=FLAGS.min_num_steps,
+                   batch_size=FLAGS.batch_size)
+  eval_actor = agent.make_actor(is_eval=False)
   counter = counting.Counter()
   loop = acme.EnvironmentLoop(env,
-                              algo,
+                              agent,
                               logger=loggers.make_logger(label='environment_loop',
-                                                         time_delta=5.,
                                                          use_wandb=FLAGS.wandb),
                               counter=counter)
-  eval_logger = loggers.make_logger(label='evaluation',
-                                    time_delta=0,
-                                    use_wandb=FLAGS.wandb)
+  eval_logger = loggers.make_logger(label='evaluation', use_wandb=FLAGS.wandb)
   for _ in range(FLAGS.num_steps // FLAGS.eval_every):
     loop.run(num_steps=FLAGS.eval_every)
-    eval_stats = evaluate(algo._eval_actor, env)
+    eval_stats = utils.evaluate(eval_actor, env)
     eval_logger.write({**eval_stats, 'steps': counter.get_counts()['steps']})
   if FLAGS.wandb:
     wandb.finish()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
   app.run(main)
