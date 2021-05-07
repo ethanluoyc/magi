@@ -5,8 +5,8 @@ from absl import flags
 import acme
 from acme import specs
 from acme import wrappers
-from dm_control import suite  # type: ignore
-from dm_control.suite.wrappers import pixels  # type: ignore
+from dm_control import suite  # pytype: disable=import-error
+from dm_control.suite.wrappers import pixels  # pytype: disable=import-error
 import numpy as np
 
 from magi.agents import sac_ae
