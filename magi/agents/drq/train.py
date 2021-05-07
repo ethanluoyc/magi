@@ -5,6 +5,7 @@ from absl import flags
 import acme
 from acme import specs
 from acme import wrappers
+from acme.utils import counting
 from dm_control import suite  # pytype: disable=import-error
 from dm_control.suite.wrappers import pixels  # pytype: disable=import-error
 import numpy as np
@@ -63,6 +64,8 @@ def load_env(domain_name, task_name, seed, frame_stack, action_repeat):
 
 
 def main(_):
+  import tensorflow as tf
+  tf.config.set_visible_devices([], "GPU")
   np.random.seed(FLAGS.seed)
   if FLAGS.wandb:
     import wandb  # pylint: disable=import-outside-toplevel
@@ -88,6 +91,7 @@ def main(_):
   spec = specs.make_environment_spec(env)
   network_spec = networks.make_default_networks(spec)
 
+  counter = counting.Counter()
   agent = drq.DrQAgent(environment_spec=spec,
                        networks=network_spec,
                        config=DrQConfig(
@@ -98,19 +102,24 @@ def main(_):
                        seed=FLAGS.seed,
                        logger=loggers.make_logger(label='learner',
                                                   log_frequency=1000,
-                                                  use_wandb=FLAGS.wandb))
+                                                  use_wandb=FLAGS.wandb),
+                       counter=counting.Counter(counter, 'learner'))
   eval_actor = agent.make_actor(is_eval=True)
-
   loop = acme.EnvironmentLoop(env,
                               agent,
                               logger=loggers.make_logger(label='environment_loop',
-                                                         use_wandb=FLAGS.wandb))
+                                                         log_frequency=20,
+                                                         use_wandb=FLAGS.wandb),
+                              counter=counting.Counter(counter, 'train'))
   eval_loop = acme.EnvironmentLoop(test_env,
                                    eval_actor,
                                    logger=loggers.make_logger(label='eval',
-                                                              use_wandb=FLAGS.wandb))
-  for _ in range(FLAGS.num_steps // FLAGS.eval_freq):
-    loop.run(num_steps=FLAGS.eval_freq)
+                                                              use_wandb=FLAGS.wandb),
+                                   counter=counting.Counter(counter, 'eval'))
+  num_steps = FLAGS.num_steps // action_repeat
+  eval_freq = FLAGS.eval_freq
+  for _ in range(num_steps // eval_freq):
+    loop.run(num_steps=eval_freq)
     eval_actor.update(wait=True)
     eval_loop.run(num_episodes=FLAGS.eval_episodes)
 
