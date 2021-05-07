@@ -19,8 +19,9 @@ class MLP(hk.Module):
       output_activation=None,
       hidden_scale=1.0,
       output_scale=1.0,
+      name=None
   ):
-    super().__init__()
+    super().__init__(name=name)
     self.output_dim = output_dim
     self.hidden_units = hidden_units
     self.hidden_activation = hidden_activation
@@ -52,7 +53,7 @@ class DeltaOrthogonal(hk.initializers.Initializer):
     return init_fn(hk.next_rng_key(), shape, dtype)
 
 
-class StateDependentGaussianPolicy(hk.Module):
+class Policy(hk.Module):
   """
     Policy for SAC.
     """
@@ -60,14 +61,15 @@ class StateDependentGaussianPolicy(hk.Module):
   def __init__(
       self,
       action_size,
-      hidden_units=(256, 256),
+      hidden_sizes=(256, 256),
       log_std_min=-20.0,
       log_std_max=2.0,
       clip_log_std=True,
+      name=None
   ):
-    super().__init__()
+    super().__init__(name=name)
     self.action_size = action_size
-    self.hidden_units = hidden_units
+    self.hidden_sizes = hidden_sizes
     self.log_std_min = log_std_min
     self.log_std_max = log_std_max
     self.clip_log_std = clip_log_std
@@ -75,7 +77,7 @@ class StateDependentGaussianPolicy(hk.Module):
   def __call__(self, x):
     x = MLP(
         2 * self.action_size,
-        self.hidden_units,
+        self.hidden_sizes,
         hidden_activation=nn.relu,
         hidden_scale=jnp.sqrt(2.),
     )(x)
@@ -90,7 +92,7 @@ class StateDependentGaussianPolicy(hk.Module):
     return GaussianTanhTransformedHead(mean, log_std)
 
 
-class SACEncoder(hk.Module):
+class Encoder(hk.Module):
   """
     Encoder for SAC+AE.
     """
@@ -133,56 +135,50 @@ class SACLinear(hk.Module):
     which are used by the actor and critic respectively and they do not share weights.
   """
 
-  def __init__(self, feature_dim):
+  def __init__(self, output_size):
     super().__init__()
-    self.feature_dim = feature_dim
+    self.output_size = output_size
 
   def __call__(self, x):
     w_init = hk.initializers.Orthogonal(scale=1.0)
-    x = hk.Linear(self.feature_dim, w_init=w_init)(x)
+    x = hk.Linear(self.output_size, w_init=w_init)(x)
     x = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(x)
     x = jnp.tanh(x)
     return x
 
 
-class ContinuousQFunction(hk.Module):
+class Critic(hk.Module):
   """
     Critic for DDPG, TD3 and SAC.
     """
 
-  def __init__(
-      self,
-      num_critics=2,
-      hidden_units=(256, 256),
-      name=None
-  ):
+  def __init__(self, hidden_sizes=(256, 256), name=None):
     super().__init__(name)
-    self.num_critics = num_critics
-    self.hidden_units = hidden_units
+    self.hidden_sizes = hidden_sizes
 
   def __call__(self, s, a):
 
     def _fn(x):
       return MLP(
           1,
-          self.hidden_units,
+          self.hidden_sizes,
           hidden_activation=nn.relu,
           hidden_scale=jnp.sqrt(2.),
       )(x)
 
     x = jnp.concatenate([s, a], axis=-1)
     # Return list even if num_critics == 1 for simple implementation.
-    return [_fn(x).squeeze(-1) for _ in range(self.num_critics)]
+    return [_fn(x).squeeze(-1) for _ in range(2)]
 
 
-class SACDecoder(hk.Module):
+class Decoder(hk.Module):
   """
     Decoder for SAC+AE.
     """
 
-  def __init__(self, state_shape, num_layers=4, num_filters=32):
+  def __init__(self, output_channels, num_layers=4, num_filters=32):
     super().__init__()
-    self.state_shape = state_shape
+    self.output_channels = output_channels
     self.num_layers = num_layers
     self.num_filters = num_filters
     self._activation = jax.nn.relu
@@ -193,8 +189,7 @@ class SACDecoder(hk.Module):
     # Apply linear layer.
     w_init = hk.initializers.Orthogonal(scale=jnp.sqrt(2.))
     x = hk.Linear(self.last_conv_dim, w_init=w_init)(x)
-    x = self._activation(x).reshape(-1, self.map_size, self.map_size,
-                                    self.num_filters)
+    x = self._activation(x).reshape(-1, self.map_size, self.map_size, self.num_filters)
 
     # Apply Transposed CNN.
     w_init = DeltaOrthogonal(scale=np.sqrt(2.))
@@ -208,7 +203,7 @@ class SACDecoder(hk.Module):
 
     # Apply output layer.
     w_init = DeltaOrthogonal(scale=1.0)
-    x = hk.Conv2DTranspose(self.state_shape.shape[2],
+    x = hk.Conv2DTranspose(self.output_channels,
                            kernel_shape=4,
                            stride=2,
                            padding="VALID",
@@ -286,7 +281,6 @@ def reparameterize_gaussian_and_tanh(
 
 def make_default_networks(
     environment_spec,
-    num_critics: int = 2,
     critic_hidden_sizes: Sequence[int] = (1024, 1024),
     actor_hidden_sizes: Sequence[int] = (1024, 1024),
     latent_size: int = 50,
@@ -301,34 +295,33 @@ def make_default_networks(
     # We need to define the linear layer outside the critic because the decoder needs
     # to use the latents from the output AFTER applying the linear layer for
     # reconstruction.
-    return ContinuousQFunction(
-        num_critics=num_critics,
-        hidden_units=critic_hidden_sizes,
+    return Critic(
+        hidden_sizes=critic_hidden_sizes,
     )(x, a)
 
   def actor(x):
     # Define with linear layer.
     # Since the actor path is not needed for reconstruction we can put the linear
     # layer for the actor path here.
-    x = SACLinear(feature_dim=latent_size)(x)
-    return StateDependentGaussianPolicy(
+    x = SACLinear(output_size=latent_size)(x)
+    return Policy(
         action_size=environment_spec.actions.shape[0],
-        hidden_units=actor_hidden_sizes,
+        hidden_sizes=actor_hidden_sizes,
         log_std_min=log_std_min,
         log_std_max=log_std_max,
         clip_log_std=False,
     )(x)
 
   def encoder(x):
-    return SACEncoder(num_filters=num_filters, num_layers=num_layers)(x)
+    return Encoder(num_filters=num_filters, num_layers=num_layers)(x)
 
   def linear(x):
-    return SACLinear(feature_dim=latent_size)(x)
+    return SACLinear(output_size=latent_size)(x)
 
   def decoder(x):
-    return SACDecoder(environment_spec.observations,
-                      num_filters=num_filters,
-                      num_layers=num_layers)(x)
+    return Decoder(environment_spec.observations.shape[-1],
+                   num_filters=num_filters,
+                   num_layers=num_layers)(x)
 
   # Encoder.
   return {

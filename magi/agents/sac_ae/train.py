@@ -10,8 +10,8 @@ from dm_control.suite.wrappers import pixels
 import numpy as np
 
 from magi.agents import sac_ae
-from magi.agents.sac_ae import networks
 from magi.agents.sac_ae.agent import SACAEConfig
+from magi.agents.sac_ae import networks
 from magi.utils import loggers
 from magi.utils.wrappers import FrameStackingWrapper
 from magi.utils.wrappers import TakeKeyWrapper
@@ -26,9 +26,9 @@ flags.DEFINE_string('logdir', './logs', '')
 flags.DEFINE_integer('num_steps', int(1e6), '')
 flags.DEFINE_integer('eval_freq', 5000, '')
 flags.DEFINE_integer('eval_episodes', 10, '')
-flags.DEFINE_integer('frame_stack', 3, '')
-flags.DEFINE_integer('action_repeat', None, '')
-flags.DEFINE_integer('max_replay_size', int(100000), 'Random seed.')
+flags.DEFINE_integer('frame_stack', 3, 'Number of frames to stack')
+flags.DEFINE_integer('action_repeat', None, 'Number of action repeat')
+flags.DEFINE_integer('max_replay_size', int(100000), 'Maximum replay size')
 flags.DEFINE_integer('seed', 0, 'Random seed.')
 
 PLANET_ACTION_REPEAT = {

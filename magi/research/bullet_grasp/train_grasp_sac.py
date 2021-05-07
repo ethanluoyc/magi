@@ -14,8 +14,8 @@ import numpy as np
 
 from magi.agents.sac.agent import SACAgent
 from magi.experimental.environments import bullet_kuka_env
-from magi.utils import loggers
 from magi.research.bullet_grasp import utils
+from magi.utils import loggers
 
 FLAGS = flags.FLAGS
 flags.DEFINE_bool('wandb', False, 'whether to log result to wandb')
@@ -130,7 +130,7 @@ def main(_):
                    logger=loggers.make_logger(label='learner',
                                               log_frequency=500,
                                               use_wandb=FLAGS.wandb),
-                   start_steps=FLAGS.min_num_steps,
+                   initial_num_steps=FLAGS.min_num_steps,
                    batch_size=FLAGS.batch_size)
   eval_actor = agent.make_actor(is_eval=False)
   counter = counting.Counter()

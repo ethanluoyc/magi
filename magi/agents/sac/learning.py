@@ -2,8 +2,8 @@ from functools import partial
 from typing import Iterator, Optional
 
 from acme import core
-from acme import specs
 from acme.jax import utils
+from acme import specs
 from acme.utils import counting
 from acme.utils import loggers
 import haiku as hk
@@ -50,32 +50,32 @@ class SACLearner(core.Learner, core.VariableSource):
     dummy_action = utils.add_batch_dim(utils.zeros_like(environment_spec.actions))
 
     # Critic.
-    self.critic = critic
-    self.params_critic = self.params_critic_target = self.critic.init(
+    self._critic = critic
+    self._critic_params = self._critic_target_params = self._critic.init(
         next(self._rng), dummy_state, dummy_action)
-    opt_init, self.opt_critic = critic_optimizer
-    self.opt_state_critic = opt_init(self.params_critic)
+    opt_init, self._critic_opt = critic_optimizer
+    self._critic_opt_state = opt_init(self._critic_params)
     # Actor.
-    self.actor = policy
-    self.params_actor = self.actor.init(next(self._rng), dummy_state)
-    opt_init, self.opt_actor = actor_optimizer
-    self.opt_state_actor = opt_init(self.params_actor)
+    self._actor = policy
+    self._actor_params = self._actor.init(next(self._rng), dummy_state)
+    opt_init, self._actor_opt = actor_optimizer
+    self._actor_opt_state = opt_init(self._actor_params)
     # Entropy coefficient.
-    self.target_entropy = heuristic_target_entropy(environment_spec.actions)
-    self.log_alpha = jnp.array(np.log(init_alpha), dtype=jnp.float32)
-    opt_init, self.opt_alpha = alpha_optimizer
-    self.opt_state_alpha = opt_init(self.log_alpha)
+    self._target_entropy = heuristic_target_entropy(environment_spec.actions)
+    self._log_alpha = jnp.array(np.log(init_alpha), dtype=jnp.float32)
+    opt_init, self._alpha_opt = alpha_optimizer
+    self._alpha_opt_state = opt_init(self._log_alpha)
 
     @jax.jit
     def _update_actor(params_actor, opt_state, key, params_critic, log_alpha,
                       observation):
 
       def loss_fn(actor_params):
-        return losses.actor_loss_fn(self.actor, self.critic, actor_params, key,
+        return losses.actor_loss_fn(self._actor, self._critic, actor_params, key,
                                     params_critic, log_alpha, observation)
 
       (loss, aux), grad = jax.value_and_grad(loss_fn, has_aux=True)(params_actor)
-      update, opt_state = self.opt_actor(grad, opt_state)
+      update, opt_state = self._actor_opt(grad, opt_state)
       params_actor = optax.apply_updates(params_actor, update)
       return params_actor, opt_state, loss, aux
 
@@ -84,8 +84,8 @@ class SACLearner(core.Learner, core.VariableSource):
                        actor_params, log_alpha, batch):
 
       def loss_fn(critic_params):
-        return losses.critic_loss_fn(self.actor,
-                                     self.critic,
+        return losses.critic_loss_fn(self._actor,
+                                     self._critic,
                                      critic_params,
                                      key,
                                      critic_target_params,
@@ -95,7 +95,7 @@ class SACLearner(core.Learner, core.VariableSource):
                                      gamma=self._gamma)
 
       (loss, aux), grad = jax.value_and_grad(loss_fn, has_aux=True)(params_critic)
-      update, opt_state = self.opt_critic(grad, opt_state)
+      update, opt_state = self._critic_opt(grad, opt_state)
       params_critic = optax.apply_updates(params_critic, update)
       return params_critic, opt_state, loss, aux
 
@@ -105,10 +105,10 @@ class SACLearner(core.Learner, core.VariableSource):
       def loss_fn(log_alpha):
         return losses.alpha_loss_fn(log_alpha,
                                     entropy,
-                                    target_entropy=self.target_entropy)
+                                    target_entropy=self._target_entropy)
 
       (loss, aux), grad = jax.value_and_grad(loss_fn, has_aux=True)(log_alpha)
-      update, opt_state = self.opt_alpha(grad, opt_state)
+      update, opt_state = self._alpha_opt(grad, opt_state)
       log_alpha = optax.apply_updates(log_alpha, update)
       return log_alpha, opt_state, loss, aux
 
@@ -121,39 +121,42 @@ class SACLearner(core.Learner, core.VariableSource):
     batch = next(self._iterator)
 
     # Update critic.
-    self.params_critic, self.opt_state_critic, loss_critic, _ = self._update_critic(
-        self.params_critic,
-        self.opt_state_critic,
-        key=next(self._rng),
-        critic_target_params=self.params_critic_target,
-        actor_params=self.params_actor,
-        log_alpha=self.log_alpha,
-        batch=batch)
+    self._critic_params, self._critic_opt_state, loss_critic, critic_stats = (
+        self._update_critic(self._critic_params,
+                            self._critic_opt_state,
+                            key=next(self._rng),
+                            critic_target_params=self._critic_target_params,
+                            actor_params=self._actor_params,
+                            log_alpha=self._log_alpha,
+                            batch=batch))
     # Update actor
-    self.params_actor, self.opt_state_actor, loss_actor, actor_stats = (
-        self._update_actor(self.params_actor,
-                           self.opt_state_actor,
+    self._actor_params, self._actor_opt_state, loss_actor, actor_stats = (
+        self._update_actor(self._actor_params,
+                           self._actor_opt_state,
                            key=next(self._rng),
-                           params_critic=self.params_critic,
-                           log_alpha=self.log_alpha,
+                           params_critic=self._critic_params,
+                           log_alpha=self._log_alpha,
                            observation=batch.data.observation))
-    self.log_alpha, self.opt_state_alpha, loss_alpha, _ = self._update_alpha(
-        self.log_alpha,
-        self.opt_state_alpha,
+    self._log_alpha, self._alpha_opt_state, loss_alpha, _ = self._update_alpha(
+        self._log_alpha,
+        self._alpha_opt_state,
         entropy=actor_stats['entropy'],
     )
     self._counter.increment(steps=1)
     results = {
-        'loss_alpha': loss_alpha,
-        'loss_actor': loss_actor,
-        'loss_critic': loss_critic,
-        'alpha': jnp.exp(self.log_alpha)
+        'q1': critic_stats['q1'],
+        'q2': critic_stats['q2'],
+        'critic_loss': loss_critic,
+        'alpha': jnp.exp(self._log_alpha),
+        'alpha_loss': loss_alpha,
+        'actor_loss': loss_actor,
+        'entropy': actor_stats['entropy'],
     }
     self._logger.write(results)
     # Update target network.
-    self.params_critic_target = self._update_target(self.params_critic,
-                                                    self.params_critic_target)
+    self._critic_target_params = self._update_target(self._critic_params,
+                                                     self._critic_target_params)
 
   def get_variables(self, names):
     del names
-    return [self.params_actor]
+    return [self._actor_params]

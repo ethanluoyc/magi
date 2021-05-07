@@ -1,21 +1,21 @@
 """Soft Actor-Critic implementation"""
-from typing import Optional, Sequence
 import dataclasses
+from typing import Optional, Sequence
 
+from acme.adders import reverb as adders
 from acme import core
 from acme import datasets
-from acme import specs
-from acme.adders import reverb as adders
 from acme.jax import networks as network_lib
 from acme.jax import variable_utils
+from acme import specs
 from acme.utils import counting
 from acme.utils import loggers
-import haiku as hk
 import dm_env
+import haiku as hk
 import jax
+import optax
 import reverb
 from reverb import rate_limiters
-import optax
 
 from magi.agents import actors
 from magi.agents.sac import acting as acting_lib
@@ -57,8 +57,8 @@ class SACAgentFromConfig(core.Actor):
                config: SACConfig,
                logger: Optional[loggers.Logger] = None,
                counter: Optional[counting.Counter] = None):
-    learner_key, actor_key, actor_key2, random_key = jax.random.split(
-        jax.random.PRNGKey(seed), 4)
+    learner_key, actor_key, random_key = jax.random.split(
+        jax.random.PRNGKey(seed), 3)
     self._num_observations = 0
     self._initial_num_steps = config.initial_num_steps
 
@@ -113,10 +113,6 @@ class SACAgentFromConfig(core.Actor):
                                       is_eval=False,
                                       variable_client=client,
                                       adder=adder)
-    self._eval_actor = acting_lib.SACActor(policy.apply,
-                                           actor_key2,
-                                           is_eval=False,
-                                           variable_client=client)
     self._random_actor = actors.RandomActor(environment_spec.actions,
                                             random_key,
                                             adder=adder)
@@ -161,29 +157,29 @@ class SACAgent(SACAgentFromConfig):
                policy: hk.Transformed,
                critic: hk.Transformed,
                seed: int,
-               gamma: float = 0.99,
-               buffer_size: int = 10**6,
+               discount: float = 0.99,
+               max_replay_size: int = int(10**6),
                batch_size: int = 256,
-               start_steps: int = 10000,
+               initial_num_steps: int = 10000,
                tau: float = 5e-3,
-               lr_actor: float = 3e-4,
-               lr_critic: float = 3e-4,
-               lr_alpha: float = 3e-4,
-               init_alpha: float = 1.0,
-               adam_b1_alpha: float = 0.9,
+               actor_learning_rate: float = 3e-4,
+               critic_learning_rate: float = 3e-4,
+               temperature_learning_rate: float = 3e-4,
+               init_temperature: float = 1.0,
+               temperature_adam_b1: float = 0.9,
                logger: Optional[loggers.Logger] = None,
                counter: Optional[counting.Counter] = None):
     config = SACConfig(
-        discount=gamma,
-        max_replay_size=buffer_size,
+        discount=discount,
+        max_replay_size=max_replay_size,
         batch_size=batch_size,
-        initial_num_steps=start_steps,
+        initial_num_steps=initial_num_steps,
         critic_soft_update_rate=tau,
-        actor_learning_rate=lr_actor,
-        critic_learning_rate=lr_critic,
-        temperature_learning_rate=lr_alpha,
-        init_temperature=init_alpha,
-        temperature_adam_b1=adam_b1_alpha,
+        actor_learning_rate=actor_learning_rate,
+        critic_learning_rate=critic_learning_rate,
+        temperature_learning_rate=temperature_learning_rate,
+        init_temperature=init_temperature,
+        temperature_adam_b1=temperature_adam_b1,
     )
     super().__init__(environment_spec,
                      policy,

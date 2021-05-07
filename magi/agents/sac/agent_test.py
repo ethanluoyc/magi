@@ -47,7 +47,7 @@ class SACTest(absltest.TestCase):
                      policy=policy,
                      critic=critic,
                      seed=0,
-                     start_steps=10,
+                     initial_num_steps=10,
                      batch_size=1)
 
     # Try running the environment loop. We have no assertions here because all

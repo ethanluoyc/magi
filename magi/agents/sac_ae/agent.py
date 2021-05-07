@@ -3,13 +3,13 @@ from functools import partial
 import time
 from typing import Any, Mapping, Optional
 
-from acme import types
 from acme.adders import reverb as adders
 from acme import core
 from acme import datasets
 from acme.jax import utils
 from acme.jax import variable_utils
 from acme import specs
+from acme import types
 from acme.utils import counting
 from acme.utils import loggers
 import dm_env
@@ -22,23 +22,24 @@ import reverb
 from reverb import rate_limiters
 
 from magi.agents import actors
-from magi.agents.sac import acting, losses
+from magi.agents.sac import acting
+from magi.agents.sac import losses
 
 
 @jax.jit
-def preprocess_state(
-    state: np.ndarray,
+def preprocess_observation(
+    observation: np.ndarray,
     key: jnp.ndarray,
 ) -> jnp.ndarray:
   """
     Preprocess pixel states to fit into [-0.5, 0.5].
-    """
-  state = state.astype(jnp.float32)
-  state = jnp.floor(state / 8)
-  state = state / 32
-  state = state + jax.random.uniform(key, state.shape) / 32
-  state = state - 0.5
-  return state
+  """
+  observation = observation.astype(jnp.float32)
+  observation = jnp.floor(observation / 8)
+  observation = observation / 32
+  observation = observation + jax.random.uniform(key, observation.shape) / 32
+  observation = observation - 0.5
+  return observation
 
 
 @jax.jit
@@ -61,23 +62,6 @@ def weight_decay(params: hk.Params) -> jnp.ndarray:
     """
   leaves, _ = jax.tree_flatten(params)
   return 0.5 * sum(jnp.vdot(x, x) for x in leaves)
-
-
-@jax.jit
-def clip_gradient_norm(
-    grad: Any,
-    max_grad_norm: float,
-) -> Any:
-  """
-    Clip norms of gradients.
-    """
-
-  def _clip_gradient_norm(g):
-    clip_coef = max_grad_norm / (jax.lax.stop_gradient(jnp.linalg.norm(g)) + 1e-6)
-    clip_coef = jnp.clip(clip_coef, a_max=1.0)
-    return g * clip_coef
-
-  return jax.tree_map(lambda g: _clip_gradient_norm(g), grad)
 
 
 # Loss functions
@@ -180,7 +164,8 @@ class SACAEConfig:
   actor_update_frequency: int = 2
   # log_std_bounds: Tuple[float, float] = [-10, 2]
 
-  max_grad_norm: Optional[float] = None
+  # TODO(yl): Handle maximum gradient norm
+  max_grad_norm: float = np.inf
 
   autoencoder_learning_rate: float = 1e-3
   encoder_update_frequency: int = 1
@@ -200,7 +185,7 @@ class SACAEAgent(core.Actor, core.VariableSource):
                networks: Mapping[str, Any],
                seed: int,
                config: Optional[SACAEConfig] = None,
-               target_processor=preprocess_state,
+               target_processor=preprocess_observation,
                counter: Optional[counting.Counter] = None,
                logger: Optional[loggers.Logger] = None):
     # Setup reverb
@@ -263,7 +248,8 @@ class SACAEAgent(core.Actor, core.VariableSource):
     # Actor.
     self._actor = hk.without_apply_rng(hk.transform(networks['actor']))
     self._actor_params = self._actor.init(next(self._rng), example_last_conv)
-    self._opt_actor = optax.adam(config.actor_learning_rate)
+    self._opt_actor = optax.chain(optax.clip_by_global_norm(config.max_grad_norm),
+                                  optax.adam(config.actor_learning_rate))
     self._opt_state_actor = self._opt_actor.init(self._actor_params)
 
     # Entropy coefficient.
@@ -279,7 +265,8 @@ class SACAEAgent(core.Actor, core.VariableSource):
     self._opt_state_ae = self._opt_ae.init(self._params_ae)
 
     # Critic
-    self._opt_critic = optax.adam(config.critic_learning_rate)
+    self._opt_critic = optax.chain(optax.clip_by_global_norm(config.max_grad_norm),
+                                   optax.adam(config.critic_learning_rate))
     self._opt_state_critic = self._opt_critic.init(self._params_entire_critic)
 
     # Setup losses
