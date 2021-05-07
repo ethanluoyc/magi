@@ -5,7 +5,7 @@ from absl import flags
 import acme
 from acme import specs
 from acme import wrappers
-from dm_control import suite
+from dm_control import suite  # type: ignore
 import haiku as hk
 import numpy as np
 
