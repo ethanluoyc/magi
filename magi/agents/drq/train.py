@@ -1,3 +1,4 @@
+from os import environ
 import time
 
 from absl import app
@@ -13,6 +14,7 @@ import numpy as np
 from magi.agents import drq
 from magi.agents.drq.agent import DrQConfig
 from magi.agents.drq import networks
+from magi.agents.drq import environment_loop
 from magi.utils import loggers
 from magi.utils.wrappers import FrameStackingWrapper
 from magi.utils.wrappers import TakeKeyWrapper
@@ -105,21 +107,23 @@ def main(_):
                                                   use_wandb=FLAGS.wandb),
                        counter=counting.Counter(counter, 'learner'))
   eval_actor = agent.make_actor(is_eval=True)
-  loop = acme.EnvironmentLoop(env,
-                              agent,
-                              logger=loggers.make_logger(label='environment_loop',
-                                                         log_frequency=20,
-                                                         use_wandb=FLAGS.wandb),
-                              counter=counting.Counter(counter, 'train'))
-  eval_loop = acme.EnvironmentLoop(test_env,
-                                   eval_actor,
-                                   logger=loggers.make_logger(label='eval',
-                                                              use_wandb=FLAGS.wandb),
-                                   counter=counting.Counter(counter, 'eval'))
-  num_steps = FLAGS.num_steps // action_repeat
-  eval_freq = FLAGS.eval_freq
-  for _ in range(num_steps // eval_freq):
-    loop.run(num_steps=eval_freq)
+  train_loop = environment_loop.ActionRepeatEnvironmentLoop(
+      env,
+      agent,
+      logger=loggers.make_logger(label='train',
+                                 log_frequency=5,
+                                 use_wandb=FLAGS.wandb),
+      counter=counting.Counter(counter, 'train'),
+      action_repeat=action_repeat)
+  eval_loop = environment_loop.ActionRepeatEnvironmentLoop(
+      test_env,
+      eval_actor,
+      logger=loggers.make_logger(label='eval', use_wandb=FLAGS.wandb),
+      counter=counting.Counter(counter, 'eval'),
+      action_repeat=action_repeat)
+
+  for _ in range(FLAGS.num_steps // (FLAGS.eval_freq * action_repeat)):
+    train_loop.run(num_steps=FLAGS.eval_freq * action_repeat)
     eval_actor.update(wait=True)
     eval_loop.run(num_episodes=FLAGS.eval_episodes)
 
