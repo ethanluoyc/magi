@@ -5,16 +5,16 @@ from absl import app
 from absl import flags
 import acme
 from acme import specs
-from acme import wrappers
 from acme.utils import counting
+from acme import wrappers
 from dm_control import suite  # pytype: disable=import-error
 from dm_control.suite.wrappers import pixels  # pytype: disable=import-error
 import numpy as np
 
 from magi.agents import drq
 from magi.agents.drq.agent import DrQConfig
-from magi.agents.drq import networks
 from magi.agents.drq import environment_loop
+from magi.agents.drq import networks
 from magi.utils import loggers
 from magi.utils.wrappers import FrameStackingWrapper
 from magi.utils.wrappers import TakeKeyWrapper

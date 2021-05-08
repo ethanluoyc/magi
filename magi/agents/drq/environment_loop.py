@@ -23,7 +23,6 @@ from acme import core
 # Internal imports.
 from acme.utils import counting
 from acme.utils import loggers
-
 import dm_env
 from dm_env import specs
 import numpy as np
