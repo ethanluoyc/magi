@@ -3,14 +3,13 @@ from functools import partial
 import time
 from typing import Any, Mapping, NamedTuple, Optional
 
-from acme import types
-
 from acme.adders import reverb as adders
 from acme import core
 from acme import datasets
 from acme.jax import utils
 from acme.jax import variable_utils
 from acme import specs
+from acme import types
 from acme.utils import counting
 from acme.utils import loggers
 import chex
@@ -25,8 +24,8 @@ from reverb import rate_limiters
 from reverb.replay_sample import ReplaySample
 
 from magi.agents import actors
-from magi.agents.sac import acting
 from magi.agents.drq.augmentations import batched_random_crop
+from magi.agents.sac import acting
 
 batched_random_crop = jax.jit(batched_random_crop)
 
@@ -184,7 +183,6 @@ class DrQAgent(core.Actor, core.VariableSource):
     address = f'localhost:{self._server.port}'
     # The dataset provides an interface to sample from replay.
     dataset = datasets.make_reverb_dataset(server_address=address,
-                                           environment_spec=environment_spec,
                                            batch_size=config.batch_size,
                                            transition_adder=True)
 

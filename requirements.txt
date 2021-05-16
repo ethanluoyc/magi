@@ -1,7 +1,7 @@
 -f https://storage.googleapis.com/jax-releases/jax_releases.html
 jax
 jaxlib==0.1.65+cuda110
-git+https://github.com/deepmind/acme.git@master#egg=dm-acme[jax,reverb,envs,tf]
+git+https://github.com/deepmind/acme.git@7aa348598200358cc56a8415a3550b728c2a9be3#egg=dm-acme[jax,reverb,envs,tf]
 tfp-nightly
 pandas
 wandb
