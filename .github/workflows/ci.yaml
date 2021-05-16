@@ -16,8 +16,8 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - uses: actions/cache@v2
       with:
-        path: ~/.cache/pip
-        key: ${{ hashFiles('setup.cfg') }}-${{ hashFiles('requirements.txt') }}
+        path: ${{ env.pythonLocation }}
+        key: ${{ env.pythonLocation }}-${{ hashFiles('setup.py') }}-${{ hashFiles('requirements.txt') }}
     - name: Install dependencies
       run: |
         pip install --upgrade --upgrade-strategy eager pip setuptools wheel

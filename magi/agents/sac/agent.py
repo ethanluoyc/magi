@@ -77,7 +77,6 @@ class SACAgentFromConfig(core.Actor):
     address = f'localhost:{self._server.port}'
     # The dataset provides an interface to sample from replay.
     dataset = datasets.make_reverb_dataset(server_address=address,
-                                           environment_spec=environment_spec,
                                            batch_size=config.batch_size,
                                            prefetch_size=config.prefetch_size,
                                            transition_adder=True)
