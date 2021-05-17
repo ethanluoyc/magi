@@ -2,12 +2,13 @@
 tf-nightly==2.6.0.dev20210427
 tfp-nightly==0.13.0.dev20210427
 tensorflow_datasets
+
 # Dependencies used by acme.agents.tf
 dm-sonnet
 trfl
 
 # JAX and the DeepMind JAX eco-system
--f https://storage.googleapis.com/jax-releases/jax_releases.html
+# -f https://storage.googleapis.com/jax-releases/jax_releases.html
 jax==0.2.11
 jaxlib==0.1.64+cuda110
 dm-haiku>=0.0.4
@@ -19,14 +20,7 @@ distrax<=0.0.1
 # Reverb
 dm-reverb-nightly==0.3.0.dev20210427
 
-# Environments
-bsuite
-dm-control
-gym
-pybullet
-
 # Acme
-git+https://github.com/deepmind/acme.git@7aa348598200358cc56a8415a3550b728c2a9be3#egg=dm-acme
-
+dm-acme @ git+https://github.com/deepmind/acme.git@7aa348598200358cc56a8415a3550b728c2a9be3#egg=dm-acme
 pandas
 wandb

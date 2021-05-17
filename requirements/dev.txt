@@ -1,0 +1,13 @@
+# Testing
+pytest
+pytest-xdist
+# Linting, typechecking, formatting, pre-commit hooks
+pylint==2.8.2
+flake8
+isort
+pytype
+yapf
+pre-commit
+# Documentation
+sphinx
+recommonmark # Markdown support for documentation

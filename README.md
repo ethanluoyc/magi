@@ -9,13 +9,15 @@ Reinforcement learning library in JAX built on top of [Acme](https://github.com/
 python3 -m venv venv
 ```
 
-2. Install the dependencies
+2. Install dependencies and the package in editable mode by running
+
 ```python
-python3 -m venv venv
+pip install -f https://storage.googleapis.com/jax-releases/jax_releases.html -e .
+pip install -e '.[dev,envs]'
 ```
 
-3. Install the package in editable mode by running
-
-```python
-pip install -e '.[dev,test]'
+## Testing
+On Linux, you can run tests with
+```
+pytest -n `grep -c ^processor /proc/cpuinfo` magi
 ```
