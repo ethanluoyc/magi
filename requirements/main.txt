@@ -1,6 +1,6 @@
 # TensorFlow
-tf-nightly==2.6.0.dev20210427
-tfp-nightly==0.13.0.dev20210427
+tf-nightly==2.6.0.dev20210517
+tfp-nightly==0.14.0.dev20210517
 tensorflow_datasets
 
 # Dependencies used by acme.agents.tf
@@ -18,7 +18,7 @@ typing-extensions
 distrax<=0.0.1
 
 # Reverb
-dm-reverb-nightly==0.3.0.dev20210427
+dm-reverb-nightly==0.3.0.dev20210517
 
 # Acme
 dm-acme @ git+https://github.com/deepmind/acme.git@7aa348598200358cc56a8415a3550b728c2a9be3#egg=dm-acme

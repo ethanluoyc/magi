@@ -8,14 +8,13 @@ def parse_requirements_file(path):
 
 
 main_requirements = parse_requirements_file("requirements/main.txt")
-print(main_requirements)
 dev_requirements = parse_requirements_file("requirements/dev.txt")
 envs_requirements = parse_requirements_file("requirements/envs.txt")
 
 if __name__ == "__main__":
   setuptools.setup(
       install_requires=main_requirements,
-      extra_require={
+      extras_require={
           "dev": dev_requirements,
           "envs": envs_requirements
       },
