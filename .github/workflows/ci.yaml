@@ -1,6 +1,9 @@
 name: pytest
 
-on: [pull_request]
+on:
+  pull_request:
+    branches:
+      develop
 
 jobs:
   test-ubuntu:
@@ -17,16 +20,16 @@ jobs:
     - uses: actions/cache@v2
       with:
         path: ${{ env.pythonLocation }}
-        key: ${{ env.pythonLocation }}-${{ hashFiles('setup.py') }}-${{ hashFiles('requirements.txt') }}
+        key: ${{ runner.os }}-pydeps-${{ env.pythonLocation }}-${{ hashFiles('setup.py') }}-${{ hashFiles('requirements/*.txt') }}
     - name: Install dependencies
       run: |
-        pip install --upgrade --upgrade-strategy eager pip setuptools wheel
-        pip install --upgrade --upgrade-strategy eager -r requirements.txt
-        pip install --upgrade --upgrade-strategy eager .
-        pip install --upgrade --upgrade-strategy eager .[test,dev]
+        make install
+    - name: Show installed dependencies
+      run: |
+        pip freeze
     - name: Check types with pytype
       run: |
-        pytype -j "$(grep -c ^processor /proc/cpuinfo)" magi
+        make typecheck
     - name: Test with pytest
       run: |
-        pytest -n "$(grep -c ^processor /proc/cpuinfo)" magi
+        make test
