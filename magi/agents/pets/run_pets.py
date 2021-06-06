@@ -8,10 +8,10 @@ from acme.jax import variable_utils
 from acme.utils import loggers
 from gym.wrappers.time_limit import TimeLimit
 
-from magi.agents.pets.acting import RandomOptimizerActor, CEMOptimizerActor
+from magi.agents.pets.acting import CEMOptimizerActor
 from magi.agents.pets.agent import ModelBasedAgent
-from magi.agents.pets.bnn import BNN
-from magi.agents.pets.data import Dataset
+from magi.agents.pets import models
+from magi.agents.pets.dataset import Dataset
 from magi.agents.pets.learning import ModelBasedLearner
 from magi.agents.pets.cartpole import CartpoleEnv
 from magi.agents.pets import cartpole_config
@@ -33,7 +33,7 @@ def make_network(environment_spec):
 
   def network(x, a):
     input_ = jnp.concatenate([x, a], axis=-1)
-    model = BNN(output_size)
+    model = models.BNN(output_size, hidden_sizes=[128, 128, 128])
     return model(input_)
 
   return network

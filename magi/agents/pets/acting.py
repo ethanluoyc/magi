@@ -1,5 +1,3 @@
-import functools
-
 import dm_env
 import haiku as hk
 import jax
@@ -22,7 +20,7 @@ class OptimizerBasedActor(core.Actor):
       variable_client,
       controller_fn,
       obs_preprocess,
-      target_postprocess,
+      obs_postproc,
       seed=1,
       num_particles=20,
       num_ensembles=5,
@@ -36,7 +34,7 @@ class OptimizerBasedActor(core.Actor):
     self._num_particles = num_particles
     self._num_ensembles = num_ensembles
     self._obs_preprocess = obs_preprocess
-    self._target_postprocess = target_postprocess
+    self._obs_postprocess = obs_postproc
 
     def unroll(ensem_params, x_init_parts, actions, rng):
       # ensem_params [B, ...]
@@ -61,8 +59,9 @@ class OptimizerBasedActor(core.Actor):
         mean, std = jax.vmap(self.net.apply, (0, 0, None))(ensem_params, proc_x,
                                                            a_tiled)
         # Note that we add x since we are predicting difference
-        next_x = x + mean + jax.random.normal(
+        predicted = mean + jax.random.normal(
             rng_subkey, shape=std.shape, dtype=std.dtype) * std
+        next_x = obs_postproc(x, predicted)
         return (next_x, rng), next_x
 
       states = lax.scan(step, (x_reshaped, rng), actions)[1]
@@ -118,7 +117,7 @@ class CEMOptimizerActor(OptimizerBasedActor):
       dataset,
       variable_client,
       obs_preprocess,
-      target_postprocess,
+      obs_postproc,
       time_horizon=25,
       n_iterations=5,
       pop_size=400,
@@ -147,7 +146,7 @@ class CEMOptimizerActor(OptimizerBasedActor):
     controller = jax.jit(controller, static_argnums=(0))
     # controller_fn = jax.jit(controller_fn, static_argnums=(0, 1))
     super().__init__(spec, net_fn, cost_fn, dataset, variable_client, controller,
-                     obs_preprocess, target_postprocess, seed)
+                     obs_preprocess, obs_postproc, seed)
     action_spec = self._spec.actions
     action_shape = (self.time_horizon,) + action_spec.shape
     lower_bound = np.broadcast_to(action_spec.minimum, action_shape)
@@ -198,7 +197,7 @@ class RandomOptimizerActor(OptimizerBasedActor):
       dataset,
       variable_client,
       obs_preprocess,
-      target_postprocess,
+      obs_postproces,
       num_samples=2000,
       time_horizon=25,
       seed=0,
@@ -221,4 +220,4 @@ class RandomOptimizerActor(OptimizerBasedActor):
 
     # controller_fn = jax.jit(controller_fn, static_argnums=(0, 1))
     super().__init__(spec, net_fn, cost_fn, dataset, variable_client, controller,
-                     obs_preprocess, target_postprocess, seed)
+                     obs_preprocess, obs_postproces, seed)
