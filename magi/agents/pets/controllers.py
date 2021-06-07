@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 from jax import lax
+import chex
 
 
 def cem_controller(cost_fn,
@@ -31,6 +32,7 @@ def cem_controller(cost_fn,
   state = (best_cost, best_solution, mu, var, population, key)
 
   def loop(i, state):
+    del i
     best_cost, best_actions, mu, var, population, rng = state
     rng, key, key2 = jax.random.split(rng, 3)
     lb_dist = mu - lower_bound
@@ -43,9 +45,13 @@ def cem_controller(cost_fn,
                                              upper=2.0,
                                              shape=population.shape)
     population = population * jnp.sqrt(constrained_var) + mu
-    costs = jax.vmap(cost_fn, (None, None, None, 0))(params, key2, xinit, population)
-    assert costs.ndim == 1
-    elite_idx = jnp.argsort(costs, axis=0)[:n_elite]
+    # import pdb; pdb.set_trace()
+    costs = cost_fn(params, key2, xinit, population)
+    # chex.assert_axis_dimension(costs, 0, population)
+    chex.assert_shape(costs, (pop_size,))
+    _, elite_idx = lax.top_k(-costs, n_elite)
+    # _, elite_idx = jnp.argsort(-costs)[]
+    # elite_idx = jnp.argsort(costs, axis=0)[:n_elite]
     elite = jnp.array(population[elite_idx])
     best_costs = jnp.array(costs[elite_idx])
     new_best_actions = elite[0]
@@ -79,7 +85,7 @@ def random_controller(cost_fn, action_spec, params, xinit, key, num_samples,
       minval=jnp.broadcast_to(action_spec.minimum, action_shape),
       maxval=jnp.broadcast_to(action_spec.maximum, action_shape),
   )
-  costs = jax.vmap(cost_fn, (None, None, None, 0))(params, subkey, xinit, actions)
+  costs = cost_fn(params, subkey, xinit, actions)
   return actions[jnp.argmin(costs)]
 
 

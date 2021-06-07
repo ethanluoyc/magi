@@ -45,7 +45,8 @@ def make_agent(environment_spec: specs.EnvironmentSpec):
   # Create a learner
   network = make_network(environment_spec)
   learner = ModelBasedLearner(environment_spec, network, dataset,
-                              cartpole_config.obs_preproc, cartpole_config.targ_proc)
+                              cartpole_config.obs_preproc, cartpole_config.targ_proc,
+                              num_epochs=100)
   # Create actor
   variable_client = variable_utils.VariableClient(learner, "")
 
@@ -57,7 +58,7 @@ def make_agent(environment_spec: specs.EnvironmentSpec):
       dataset,
       variable_client,
       cartpole_config.obs_preproc,
-      cartpole_config.targ_proc
+      cartpole_config.obs_postproc
   )
   agent = ModelBasedAgent(actor, learner)
   return agent

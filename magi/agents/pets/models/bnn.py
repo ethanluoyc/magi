@@ -4,6 +4,22 @@ import jax
 import jax.numpy as jnp
 
 
+def ensemble_transform(fn, ensemble_size: int):
+  fn_transformed = hk.transform(fn)
+
+  def init(rng, *args):
+    rngs = jax.random.split(rng, ensemble_size)
+    in_axes = (0,) + (None,) * len(args)
+    return jax.vmap(fn_transformed.init, in_axes=in_axes)(rngs, *args)
+
+  def apply(params, rng, *args):
+    rngs = jax.random.split(rng, ensemble_size)
+    in_axes = (0, 0) + (None,) * len(args)
+    return jax.vmap(fn_transformed.apply, in_axes=in_axes)(params, rngs, *args)
+
+  return hk.Transformed(init, apply)
+
+
 class BNN(hk.Module):
 
   def __init__(self,

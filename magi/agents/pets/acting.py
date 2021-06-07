@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 from acme import core
 from jax import lax
+import tree
 
 from magi.agents.pets import controllers
 
@@ -28,7 +29,6 @@ class OptimizerBasedActor(core.Actor):
     self._spec = spec
     self.num_updates = 0
     self._last_timestep = None
-    self.net = hk.without_apply_rng(hk.transform(net_fn))
     self._rng = hk.PRNGSequence(seed)
     self._controller_fn = controller_fn
     self._num_particles = num_particles
@@ -36,44 +36,66 @@ class OptimizerBasedActor(core.Actor):
     self._obs_preprocess = obs_preprocess
     self._obs_postprocess = obs_postproc
 
-    def unroll(ensem_params, x_init_parts, actions, rng):
-      # ensem_params [B, ...]
-      # x_init_parts [P, dim_d]
-      # actions [T, dim_a]
-      # rng: random key
-      # x_init_parts = self._obs_preprocess(x_init_parts)
-      x_reshaped = jnp.reshape(
-          x_init_parts,
-          (num_ensembles, num_particles // num_ensembles, x_init_parts.shape[-1]))
+    transformed = hk.without_apply_rng(hk.transform(net_fn))
 
-      # [B, P // B, dim_d]
-      def step(s, a):
-        x, rng = s
-        proc_x = jax.vmap(self._obs_preprocess, 0)(x)
-        rng, rng_subkey = jax.random.split(rng)
-        assert a.ndim == 1
-        a_tiled = jnp.tile(jnp.expand_dims(a, 0), (
-            proc_x.shape[1],
-            1,
-        ))
-        mean, std = jax.vmap(self.net.apply, (0, 0, None))(ensem_params, proc_x,
-                                                           a_tiled)
-        # Note that we add x since we are predicting difference
-        predicted = mean + jax.random.normal(
-            rng_subkey, shape=std.shape, dtype=std.dtype) * std
-        next_x = obs_postproc(x, predicted)
-        return (next_x, rng), next_x
+    def forward_fn(ensem_params, key, observations, actions):
+      states = self._obs_preprocess(observations)
+      # mean, std = network_transformed.apply(ensem_params, state, action)
+      # next_state =
+      num_ensembles = tree.flatten(ensem_params)[0].shape[0]
+      batch_size = states.shape[0]
+      new_batch_size, ragged = divmod(batch_size, num_ensembles)
+      if ragged:
+        raise NotImplementedError(
+            f"Ragged batch not supported. ({batch_size} % {num_ensembles} == {ragged})")
+      reshaped_states, reshaped_act = tree.map_structure(
+          lambda x: x.reshape((num_ensembles, new_batch_size, *x.shape[1:])),
+          (states, actions))
+      mean, std = jax.vmap(transformed.apply)(ensem_params, reshaped_states,
+                                              reshaped_act)
+      mean, std = tree.map_structure(lambda x: x.reshape((-1, *x.shape[2:])),
+                                     (mean, std))
+      output = jax.random.normal(key, shape=mean.shape) * std + mean
+      return self._obs_postprocess(observations, output)
 
-      states = lax.scan(step, (x_reshaped, rng), actions)[1]
-      states = jnp.reshape(states, (actions.shape[0], num_particles, states.shape[-1]))
-      return states
+    def unroll(forward_fn, params, rng, x_init, actions):
+      """Unroll model along a sequence of actions.
+      Args:
+        ensem_params: hk.Params.
+        rng: JAX random key.
+        x_init [B, D]
+        actions [T, B, A]
+      """
 
-    @jax.jit
-    def model_cost_fn(ensem_params, rng, xinit, actions):
-      xinit_particles = jnp.broadcast_to(xinit, (num_particles,) + xinit.shape)
-      states = unroll(ensem_params, xinit_particles, actions, rng)  # (T, P, state)
-      costs = jax.vmap(cost_fn, (1, None))(states, actions)  # (T, P)
-      return jnp.sum(jnp.mean(costs, -1))
+      def step(input_, a_t):
+        rng, x_t = input_
+        rng, rng_step = jax.random.split(rng)
+        # import pdb; pdb.set_trace()
+        x_tp1 = forward_fn(params, rng_step, x_t, a_t)
+        return (rng, x_tp1), x_tp1
+
+      return lax.scan(step, (rng, x_init), actions)
+
+    def model_cost_fn(params, key, x_init, actions):
+      # def objective(actions, x_init, params, key):
+      """Objective function for trajectory planning.
+      Args:
+        actions: [P, T, A]
+        x_init: [D]
+        params, key, num_particles
+      """
+      num_particles = tree.flatten(actions)[0].shape[0]
+      # xinit_particles has shape [P, D]
+      xinit_particles = jnp.broadcast_to(x_init, (num_particles,) + x_init.shape)
+      # actions now have shape [T, P, A]
+      actions = jnp.swapaxes(actions, 0, 1)
+      # unrolled_states has shape [T, P, D]
+      _, unrolled_states = unroll(forward_fn, params, key, xinit_particles, actions)
+      # costs is [T, P]
+      # print(unrolled_states.shape)
+      costs = jax.vmap(cost_fn)(unrolled_states, actions)
+      # import pdb; pdb.set_trace()
+      return jnp.sum(costs, axis=0)
 
     self.cost_fn = model_cost_fn
     self._client = variable_client

@@ -95,11 +95,15 @@ class Dataset:
     ind = np.arange(dataset_size)
     if shuffle:
       rng.shuffle(ind)
-    train_ind = ind[:train_size]
-    val_ind = ind[train_size:]
-    train_iterator = TransitionIterator(transition[train_ind], batch_size=batch_size)
-    val_iterator = TransitionIterator(transition[val_ind], batch_size=batch_size)
-    return train_iterator, val_iterator
+    if val_size == 0:
+      train_iterator = TransitionIterator(transition[ind], batch_size=batch_size)
+      return train_iterator, None
+    else:
+      train_ind = ind[:train_size]
+      val_ind = ind[train_size:]
+      train_iterator = TransitionIterator(transition[train_ind], batch_size=batch_size)
+      val_iterator = TransitionIterator(transition[val_ind], batch_size=batch_size)
+      return train_iterator, val_iterator
 
   def reset(self):
     self.observations_t = []

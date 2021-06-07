@@ -165,8 +165,9 @@ class ModelBasedLearner(core.Learner):
   def _train_model(self, dataset):
     # At the end of the episode, train the dynamics model
     # obs_t, obs_tp1, actions, rewards = dataset.collect()
-    self._early_stopper.reset()
-    train_iterator, val_iterator = dataset.get_iterators(self.batch_size, val_ratio=0.1)
+    train_iterator, val_iterator = dataset.get_iterators(self.batch_size, val_ratio=0)
+    if val_iterator is not None:
+      self._early_stopper.reset()
     for epoch in range(self.num_epochs):
       # Train
       for batch in train_iterator:
@@ -174,11 +175,12 @@ class ModelBasedLearner(core.Learner):
             self.ensem_params, self.opt_state, batch.o_tm1, batch.a_t, batch.o_t)
         # self._logger.write({'model_loss': loss, 'epoch': epoch})
       # Evaluate on validation set
-      validation_loss = self._evaluate(self.ensem_params, val_iterator)
-      should_stop = self._early_stopper.update(validation_loss, epoch)
-      if should_stop:
-        print('Early stopping')
-        break
+      if val_iterator is not None:
+        validation_loss = self._evaluate(self.ensem_params, val_iterator)
+        should_stop = self._early_stopper.update(validation_loss, epoch)
+        if should_stop:
+          print('Early stopping')
+          break
     # self._logger.write({"epoch": epoch, "validation_loss": validation_loss})
 
   def get_variables(self, names: List[str]) -> List[hk.Params]:
