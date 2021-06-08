@@ -1,4 +1,5 @@
 from typing import Optional, Sequence
+
 import haiku as hk
 import jax
 import jax.numpy as jnp
@@ -20,7 +21,7 @@ def ensemble_transform(fn, ensemble_size: int):
   return hk.Transformed(init, apply)
 
 
-class BNN(hk.Module):
+class GaussianMLP(hk.Module):
 
   def __init__(self,
                output_size: int,

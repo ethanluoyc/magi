@@ -6,7 +6,6 @@ import jax.numpy as jnp
 import tree
 
 from magi.agents.pets import models
-from magi.agents.pets.models import bnn
 
 
 class ModelEnvTest(absltest.TestCase):
@@ -19,12 +18,12 @@ class ModelEnvTest(absltest.TestCase):
 
     def network(x, a):
       input_ = jnp.concatenate([x, a], axis=-1)
-      model = models.BNN(obs_size, hidden_sizes=[10])
+      model = models.GaussianMLP(obs_size, hidden_sizes=[10])
       return model(input_)
 
     seed = 0
     num_ensembles = 2
-    ensemble = bnn.ensemble_transform(network, num_ensembles)
+    ensemble = models.ensemble_transform(network, num_ensembles)
     forward_fn = hk.without_apply_rng(hk.transform(network)).apply
     key = jax.random.PRNGKey(seed)
     ensem_params = ensemble.init(key, observations, actions)

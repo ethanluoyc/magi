@@ -1,4 +1,5 @@
 from typing import Sized
+
 import jax.numpy as jnp
 import numpy as np
 
@@ -80,7 +81,7 @@ class Dataset:
         jnp.stack(self.rewards),
     )
 
-  def get_iterators(self: Transition,
+  def get_iterators(self,
                     batch_size: int,
                     val_ratio: float,
                     shuffle: bool = True,
