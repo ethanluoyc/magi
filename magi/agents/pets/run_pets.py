@@ -10,8 +10,8 @@ from gym.wrappers.time_limit import TimeLimit
 import jax.numpy as jnp
 
 from magi.agents.pets import builder
-from magi.agents.pets.cartpole import CartpoleEnv
-from magi.agents.pets import cartpole_config
+from magi.environments.cartpole import CartpoleEnv
+from magi.agents.pets.configs import cartpole as cartpole_config
 
 
 def make_environment():

@@ -5,10 +5,11 @@ import jax
 import jax.numpy as jnp
 import tensorflow_probability as tfp
 import tree
+import optax
 
 from magi.agents.pets import acting
 from magi.agents.pets.agent import ModelBasedAgent
-from magi.agents.pets.dataset import Dataset
+from magi.agents.pets.dataset import ReplayBuffer
 from magi.agents.pets.learning import ModelBasedLearner
 from magi.agents.pets import models
 
@@ -22,8 +23,7 @@ def make_network(environment_spec,
                  max_logvar=0.5):
   output_size = environment_spec.observations.shape[-1]
 
-  def network(x, a):
-    input_ = jnp.concatenate([x, a], axis=-1)
+  def network(network_input):
     model = models.GaussianMLP(
         output_size,
         hidden_sizes=hidden_sizes,
@@ -31,7 +31,7 @@ def make_network(environment_spec,
         min_logvar=min_logvar,
         max_logvar=max_logvar,
     )
-    return model(input_)
+    return model(network_input)
 
   return network
 
@@ -70,38 +70,39 @@ def make_agent(
     logger=None,
     counter=None,
 ):
-
-  dataset = Dataset()
+  rng = jax.random.PRNGKey(seed)
+  dataset = ReplayBuffer(
+      int(1e6),
+      obs_shape=environment_spec.observations.shape,
+      action_shape=environment_spec.actions.shape,
+      max_trajectory_length=1000,
+  )
   network = make_network(environment_spec,
                          hidden_sizes,
                          activation=activation,
                          min_logvar=min_logvar,
                          max_logvar=max_logvar)
-  # Create a learner
-
   transformed = hk.without_apply_rng(hk.transform(network))
-
-  def model_init_fn(rng, x, a):
-    vmapped_init_fn = jax.vmap(transformed.init, (0, None, None))
-    ensem_params = vmapped_init_fn(jax.random.split(rng, num_ensembles),
-                                   obs_preprocess(x), a)
-    return ensem_params
 
   loss_fn, evaluate_fn = make_loss_and_eval_fn(transformed.apply,
                                                obs_preprocess,
                                                target_process,
                                                weight_decay=weight_decay)
-
+  learner_rng, actor_rng = jax.random.split(rng)
+  opt = optax.adamw(lr, weight_decay=weight_decay, eps=1e-5)
+  # Create a learner
   learner = ModelBasedLearner(
       environment_spec,
-      model_init_fn,
+      transformed.init,
       loss_fn,
+      num_ensembles,
       evaluate_fn,
+      obs_preprocess,
       dataset,
-      lr=lr,
+      opt,
       batch_size=batch_size,
       num_epochs=num_epochs,
-      seed=seed + 1000,
+      seed=learner_rng,
       min_delta=min_delta,
       val_ratio=val_ratio,
       patience=patience,
@@ -128,7 +129,7 @@ def make_agent(
         alpha=cem_alpha,
         return_mean_elites=cem_return_mean_elites,
         num_particles=num_particles,
-        seed=seed + 1001,
+        seed=actor_rng,
     )
   elif optimizer == 'random':
     actor = acting.RandomOptimizerActor(environment_spec,
@@ -140,7 +141,7 @@ def make_agent(
                                         num_samples=population_size,
                                         time_horizon=time_horizon,
                                         num_particles=num_particles,
-                                        seed=seed + 1001)
+                                        seed=actor_rng)
 
   agent = ModelBasedAgent(actor, learner)
   return agent
@@ -151,7 +152,7 @@ def make_forward_fn(network, obs_preprocess, obs_postprocess, shuffle=True):
   # TODO: Add the other options
   transformed = hk.without_apply_rng(hk.transform(network))
 
-  def init_fn(ensem_params, key, observations):
+  def init_fn(ensem_params, normalizer, key, observations):
     num_ensembles = tree.flatten(ensem_params)[0].shape[0]
     batch_size = observations.shape[0]
     if batch_size % num_ensembles:
@@ -159,30 +160,42 @@ def make_forward_fn(network, obs_preprocess, obs_postprocess, shuffle=True):
     indices = jnp.arange(batch_size)
     if shuffle:
       indices = jax.random.permutation(key, indices)
-    return indices
+    return (normalizer, indices)
 
   def forward_fn(ensem_params, state, key, observations, actions):
     # TODO(yl): Add sampling propagation indices instead of being fully deterministic
-    shuffle_indices = state
-    observations = observations[shuffle_indices]
-    actions = actions[shuffle_indices]
+    assert observations.ndim == 2
+    assert actions.ndim == 2
+    normalizer, shuffle_indices = state
+    batch_size = observations.shape[0]
 
-    states = obs_preprocess(observations)
+    shuffled_observations = observations[shuffle_indices]
+    shuffled_actions = actions[shuffle_indices]
+
+    shuffled_states = obs_preprocess(shuffled_observations)
     num_ensembles = tree.flatten(ensem_params)[0].shape[0]
-    batch_size = states.shape[0]
     new_batch_size, ragged = divmod(batch_size, num_ensembles)
+    shuffled_inputs = jnp.concatenate([shuffled_states, shuffled_actions], axis=-1)
+    normalized_inputs = normalizer(shuffled_inputs)
+    # from jax.experimental import host_callback as hcb
     if ragged:
       raise NotImplementedError(
           f'Ragged batch not supported. ({batch_size} % {num_ensembles} == {ragged})')
-    reshaped_states, reshaped_act = tree.map_structure(
+    reshaped_inputs = tree.map_structure(
         lambda x: x.reshape((num_ensembles, new_batch_size, *x.shape[1:])),
-        (states, actions))
-    mean, std = jax.vmap(transformed.apply)(ensem_params, reshaped_states, reshaped_act)
-    mean, std = tree.map_structure(lambda x: x.reshape((-1, *x.shape[2:])), (mean, std))
-    output = jax.random.normal(key, shape=mean.shape) * std + mean
-    output = obs_postprocess(observations, output)
+        normalized_inputs)
+    mean, logvar = jax.vmap(transformed.apply, in_axes=(0, 0))(ensem_params,
+                                                               reshaped_inputs)
+    # hcb.id_print((mean[0, 0], logvar[0, 0]), what='in')
+    std = jnp.exp(logvar * 0.5)
+    mean, std = tree.map_structure(lambda x: x.reshape((batch_size, mean.shape[-1])),
+                                   (mean, std))
+    # import pdb; pdb.set_trace()
+    # print("Outputs", mean.shape, jnp.mean(mean, axis=0))
+    shuffled_predictions = jax.random.normal(key, shape=mean.shape) * std + mean
+    shuffled_output = obs_postprocess(shuffled_observations, shuffled_predictions)
     # Shuffle back
-    output = jax.ops.index_update(output, shuffle_indices, output)
+    output = jax.ops.index_update(shuffled_output, shuffle_indices, shuffled_output)
     return output
 
   return init_fn, forward_fn
@@ -193,42 +206,56 @@ def make_loss_and_eval_fn(forward_fn,
                           target_postprocess,
                           weight_decay=0.00001):
   # TODO(yl): Consider internalizing the loss and score functions
+  # pylint: disable=redefined-builtin
 
-  def loss(params, x, a, xnext) -> jnp.ndarray:
+  def gaussian_nll(params, normalizer, x, a, xnext) -> jnp.ndarray:
     """Compute the loss of the network, including L2."""
     proc_x = obs_preprocess(x)
-    mean, std = forward_fn(params, proc_x, a)
-    dist = tfd.Independent(tfd.Normal(loc=mean, scale=std), 1)
+    input = jnp.concatenate([proc_x, a], axis=-1)
+    input = normalizer(input)
+    mean, logvar = forward_fn(params, input)
     target = target_postprocess(x, xnext)
-    logp_loss = -jnp.mean(dist.log_prob(target), axis=0)
-    model_params = hk.data_structures.filter(
-        lambda _, name, __: name not in ['min_logvar', 'max_logvar'], params)
-    var_params = hk.data_structures.filter(
-        lambda _, name, __: name in ['min_logvar', 'max_logvar'], params)
-    l2_loss = 0.5 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_leaves(model_params))
-    var_loss = 0.01 * (jnp.sum(var_params['gaussian_mlp']['max_logvar'])
-                       - jnp.sum(var_params['gaussian_mlp']['min_logvar']))
-    return logp_loss + weight_decay * l2_loss + var_loss
-
-  @jax.jit
-  def batched_loss(ensem_params, x, a, xnext) -> jnp.ndarray:
-    """Compute the loss of the network, including L2."""
-    losses = jax.vmap(loss, (0, None, None, None))(ensem_params, x, a, xnext)
-    return jnp.mean(losses)
-
-  def evaluate(params, x, a, xnext) -> jnp.ndarray:
-    """Compute the loss of the network, including L2."""
-    # x = self.obs_preprocess(x)
-    proc_x = obs_preprocess(x)
-    mean, std = forward_fn(params, proc_x, a)
-    dist = tfd.Independent(tfd.Normal(loc=mean, scale=std), 1)
-    target = target_postprocess(x, xnext)
-    logp_loss = -jnp.mean(dist.log_prob(target), axis=0)
+    inv_var = jnp.exp(-logvar)
+    assert mean.shape == target.shape == logvar.shape
+    mse_loss = jnp.square(mean - target)
+    logp_loss = mse_loss * inv_var + logvar
+    # mean along batch and output dimension
+    # logp_loss = logp_loss.mean(-1).mean(-1)
     return logp_loss
 
+  # @jax.jit
+  def batched_loss(ensem_params, normalizer, x, a, xnext) -> jnp.ndarray:
+    """Compute the loss of the network, including L2."""
+    nll_loss = jax.vmap(gaussian_nll, (0, None, 0, 0, 0))(ensem_params, normalizer, x,
+                                                          a, xnext)
+    return nll_loss.mean(axis=(1, 2)).sum()
+
+  def evaluate(params, normalizer, x, a, xnext) -> jnp.ndarray:
+    """Compute the validation loss of a single network, MSE.
+    """
+    # Validation is MSE
+    proc_x = obs_preprocess(x)
+    input = jnp.concatenate([proc_x, a], axis=-1)
+    input = normalizer(input)
+    mean, _ = forward_fn(params, input)
+    # dist = tfd.Independent(tfd.Normal(loc=mean, scale=std), 1)
+    target = target_postprocess(x, xnext)
+    mse_loss = jnp.mean(jnp.square(target - mean).mean(axis=-1), axis=-1)
+    return mse_loss
+
   @jax.jit
-  def batched_eval(ensem_params, x, a, xnext):
-    losses = jax.vmap(evaluate, (0, None, None, None))(ensem_params, x, a, xnext)
-    return jnp.mean(losses)
+  def batched_eval(ensem_params, normalizer, x, a, xnext):
+    """Compute the validation loss for the ensembles, MSE
+    Args:
+      params: ensemble parameters of shape [E, ...]
+      normalizer: normalizer for normalizing the inputs
+      x, a, x: training data of shape [E, B, ...]
+    Returns:
+      mse_loss: mean squared error of shape [E] from the ensembles
+    """
+    losses = jax.vmap(evaluate, (0, None, None, None, None))(ensem_params, normalizer,
+                                                             x, a, xnext)
+    # Return the validation MSE per ensemble
+    return losses
 
   return batched_loss, batched_eval

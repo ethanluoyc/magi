@@ -47,8 +47,8 @@ def main(unused_argv):
   del unused_argv
   environment = make_environment()
   environment_spec = specs.make_environment_spec(environment)
-  agent = builder.make_agent(environment_spec, lambda x, a: -reward_fns.cartpole(a, x),
-                             lambda x, a: termination_fns.cartpole(a, x), obs_preproc,
+  agent = builder.make_agent(environment_spec, lambda x, a, goal: -reward_fns.cartpole(a, x),
+                             lambda x, a, goal: termination_fns.cartpole(a, x), obs_preproc,
                              obs_postproc, targ_proc,
                              hidden_sizes=(200, 200, 200),
                              population_size=500,

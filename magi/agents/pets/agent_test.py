@@ -28,11 +28,11 @@ def ac_cost_fn(acs):
   return 0.01 * jnp.sum(jnp.square(acs), axis=-1)
 
 
-def terminal_fn(obs, act):
+def terminal_fn(obs, act, goal):
   return jnp.zeros(obs.shape[0], dtype=jnp.bool_)
 
 
-def cost_fn(obs, acs):
+def cost_fn(obs, acs, goal):
   return obs_cost_fn(obs) + ac_cost_fn(acs)
 
 

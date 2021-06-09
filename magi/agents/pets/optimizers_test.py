@@ -28,7 +28,7 @@ class OptimizerTest(chex.TestCase):
                                      return_mean_elites=False)
 
     x0 = jnp.ones(2) * 2
-    result = var_fn(x0)
+    result, _ = var_fn(x0)
     chex.assert_tree_all_close(result, jnp.zeros(2), rtol=1e-4, atol=1e-4)
 
 

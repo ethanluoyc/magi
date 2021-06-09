@@ -1,3 +1,5 @@
+from typing import Union
+from absl import logging
 from acme import core
 import dm_env
 import haiku as hk
@@ -8,9 +10,14 @@ import numpy as np
 import tree
 
 from magi.agents.pets import optimizers
+from magi.agents.pets.dataset import ReplayBuffer
+
+import tensorflow_probability as tfp
+
+tfd = tfp.experimental.substrates.jax.distributions
 
 
-def _unroll(init_fn, forward_fn, params, rng, x_init, actions):
+def _unroll(init_fn, forward_fn, params, state, rng, x_init, actions):
   """Unroll model along a sequence of actions.
   Args:
     ensem_params: hk.Params.
@@ -19,15 +26,15 @@ def _unroll(init_fn, forward_fn, params, rng, x_init, actions):
     actions [T, B, A]
   """
   rng, rng_init = jax.random.split(rng)
-  state = init_fn(params, rng_init, x_init)
+  state = init_fn(params, state, rng_init, x_init)
 
   def step(input_, a_t):
-    rng, x_t, state = input_
+    rng, x_t, params, state = input_
     rng, rng_step = jax.random.split(rng)
     x_tp1 = forward_fn(params, state, rng_step, x_t, a_t)
-    return (rng, x_tp1, state), x_tp1
+    return (rng, x_tp1, params, state), x_tp1
 
-  return lax.scan(step, (rng, x_init, state), actions)
+  return lax.scan(step, (rng, x_init, params, state), actions)
 
 
 class OptimizerBasedActor(core.Actor):
@@ -38,22 +45,27 @@ class OptimizerBasedActor(core.Actor):
       forward_fn,
       cost_fn,
       terminal_fn,
-      dataset,
+      dataset: ReplayBuffer,
       variable_client,
       controller_fn,
       time_horizon: int,
       num_particles: int = 20,
-      seed: int = 1,
+      seed: Union[jnp.ndarray, int] = 1,
+      num_initial_episodes: int = 1,
   ):
     self._spec = spec
     self._controller_fn = controller_fn
     self._time_horizon = time_horizon
     self._rng = hk.PRNGSequence(seed)
     self._last_timestep = None
+    self._first_trial = True
+    self._num_initial_episodes = num_initial_episodes
+    self._num_episodes_seen = 0
+    self._goal = None
 
     init_fn, forward_fn = forward_fn
 
-    def model_cost_fn(actions, key, params, x_init):
+    def model_cost_fn(actions, key, params, state, x_init, goal):
       """Objective function for trajectory planning.
       Args:
         actions: [B, T, A]
@@ -75,11 +87,19 @@ class OptimizerBasedActor(core.Actor):
       actions = jnp.swapaxes(actions, 0, 1)
       # unrolled_states has shape [T, P * B, D]
       # TODO(yl): Consider extracting this to a separate class
-      _, unrolled_states = _unroll(init_fn, forward_fn, params, key, xinit_particles,
-                                   actions)
-      # costs, dones is [T, P * B], map across time horizon
-      costs = jax.vmap(cost_fn)(unrolled_states, actions)
-      dones = jax.vmap(terminal_fn)(unrolled_states, actions)
+      # output is [T, P * B, D]
+      _, unrolled_states = _unroll(init_fn, forward_fn, params, state, key,
+                                   xinit_particles, actions)
+      # costs, dones is [T, P * B],
+      # map across time horizon to get per-step costs
+      # this should be more efficient than computing the cost in unroll
+      # goal_cost_fn = functools.partial(cost_fn, goal=goal)
+      # goal_terminal_fn = functools.partial(terminal_fn, goal=goal)
+      costs = jax.vmap(cost_fn, in_axes=(0, 0, None))(unrolled_states, actions, goal)
+      # import jax.experimental.host_callback as hcb
+      # hcb.id_print(costs[:, 0], what="costs")
+      dones = jax.vmap(terminal_fn, in_axes=(0, 0, None))(unrolled_states, actions,
+                                                          goal)
       costs, dones = tree.map_structure(
           lambda x: x.reshape((horizon, num_particles, batch_size)), (costs, dones))
       total_costs = jnp.zeros((
@@ -88,7 +108,9 @@ class OptimizerBasedActor(core.Actor):
       ))
       terminated = jnp.zeros((num_particles, batch_size), dtype=jnp.bool_)
       for t in range(horizon):
-        c_t = jnp.where(terminated, 0, costs[t])
+        c_t = costs[t]
+        c_t = jnp.where(terminated, 0, c_t)
+        # print(c_t)
         terminated = jnp.logical_or(dones[t], terminated)
         total_costs = total_costs + c_t
       return jnp.mean(total_costs, axis=0)
@@ -96,6 +118,7 @@ class OptimizerBasedActor(core.Actor):
     self.cost_fn = model_cost_fn
     self._client = variable_client
     self.dataset = dataset
+    self._extras = None
 
     action_spec = spec.actions
     action_shape = (time_horizon,) + action_spec.shape
@@ -106,15 +129,25 @@ class OptimizerBasedActor(core.Actor):
         (lower_bound + upper_bound) / 2)
     self._last_actions = None
 
+  def update_goal(self, goal):
+    self._goal = goal
+
   def select_action(self, observation: np.ndarray):
     # [T, A]
-    actions = self._controller_fn(
-        self.cost_fn,
-        self._client.params,
-        observation,
-        self._last_actions,
-        next(self._rng),
-    )
+    if self._num_episodes_seen < self._num_initial_episodes:
+      lb = np.broadcast_to(self._spec.actions.minimum, self._spec.actions.shape)
+      ub = np.broadcast_to(self._spec.actions.maximum, self._spec.actions.shape)
+      action = np.asarray((tfd.Uniform(low=lb, high=ub).sample(seed=next(self._rng))))
+      assert action.shape == self._spec.actions.shape
+      return action
+    variables = self._client.params
+    params = variables['params']
+    normalizer = variables['state']
+    key = next(self._rng)
+    actions, extras = self._controller_fn(self.cost_fn, params, normalizer, observation,
+                                          self._last_actions, key, self._goal)
+    # logging.info('Post opt best costs %f', extras)
+    self._extras = extras
     self._last_actions = np.asarray(actions)
     return np.array(actions[0])
 
@@ -124,20 +157,22 @@ class OptimizerBasedActor(core.Actor):
 
   def observe(self, action: np.ndarray, next_timestep: dm_env.TimeStep):
     # Add a transition to the dataset
-    self.dataset.add(
-        self._last_timestep.observation,
-        next_timestep.observation,
-        action,
-        next_timestep.reward,
-    )
+    self.dataset.add(self._last_timestep.observation,
+                     action,
+                     next_timestep.observation,
+                     next_timestep.reward,
+                     next_timestep.last())
     # Update the last observation
     self._last_timestep = next_timestep
     # TODO use initial solution
     self._last_actions = np.roll(self._last_actions, -1)
     self._last_actions[:-1] = self._initial_solution[0]
+    if next_timestep.last():
+      print("Final planning cost", self._extras)
+      self._num_episodes_seen += 1
 
   def update(self, wait=True):
-    self._client.update(wait)
+    self._client.update_and_wait()
 
 
 class CEMOptimizerActor(OptimizerBasedActor):
@@ -158,19 +193,20 @@ class CEMOptimizerActor(OptimizerBasedActor):
       return_mean_elites=False,
       num_particles=20,
       seed=0,
+      num_initial_episodes=1,
   ):
     self.dataset = dataset
     self.time_horizon = time_horizon
 
-    def controller(cost_fn, params, observation, initial_solution, key):
+    def controller(cost_fn, params, state, observation, initial_solution, key, goal):
       action_spec = spec.actions
-      action_shape = (self.time_horizon,) + action_spec.shape
+      action_shape = (time_horizon,) + action_spec.shape
       lower_bound = np.broadcast_to(action_spec.minimum, action_shape)
       upper_bound = np.broadcast_to(action_spec.maximum, action_shape)
       return optimizers.minimize_cem(cost_fn,
                                      initial_solution,
                                      key,
-                                     args=(params, observation),
+                                     args=(params, state, observation, goal),
                                      bounds=(lower_bound, upper_bound),
                                      n_iterations=n_iterations,
                                      population_size=pop_size,
@@ -181,30 +217,34 @@ class CEMOptimizerActor(OptimizerBasedActor):
 
     controller = jax.jit(controller, static_argnums=0)
     super().__init__(spec, forward_fn, cost_fn, terminal_fn, dataset, variable_client,
-                     controller, time_horizon, num_particles, seed)
+                     controller, time_horizon, num_particles, seed,
+                     num_initial_episodes)
 
 
 class RandomOptimizerActor(OptimizerBasedActor):
 
-  def __init__(self,
-               spec,
-               network,
-               cost_fn,
-               terminal_fn,
-               dataset,
-               variable_client,
-               num_samples=2000,
-               time_horizon=25,
-               num_particles=20,
-               seed=0):
+  def __init__(
+      self,
+      spec,
+      network,
+      cost_fn,
+      terminal_fn,
+      dataset,
+      variable_client,
+      num_samples=2000,
+      time_horizon=25,
+      num_particles=20,
+      seed=0,
+      num_initial_episodes=1,
+  ):
 
-    def controller(cost_fn, params, observation, initial_solution, key):
+    def controller(cost_fn, params, state, observation, initial_solution, key, goal):
       action_spec = spec.actions
       return optimizers.minimize_random(
           cost_fn,
           initial_solution,
           key,
-          args=(params, observation),
+          args=(params, state, observation, goal),
           bounds=(action_spec.minimum, action_spec.maximum),
           population_size=num_samples,
           fn_use_key=True,
@@ -213,4 +253,5 @@ class RandomOptimizerActor(OptimizerBasedActor):
     controller = jax.jit(controller, static_argnums=0)
 
     super().__init__(spec, network, cost_fn, terminal_fn, dataset, variable_client,
-                     controller, time_horizon, num_particles, seed)
+                     controller, time_horizon, num_particles, seed,
+                     num_initial_episodes)

@@ -4,6 +4,7 @@ import chex
 import jax
 from jax import lax
 import jax.numpy as jnp
+import jax.experimental.host_callback as hcb
 
 
 def minimize_cem(fn: Callable,
@@ -25,14 +26,20 @@ def minimize_cem(fn: Callable,
 
   population_shape = (population_size,) + action_shape
 
-  def loop(i, state):
-    del i
-    best_cost, best_solution, mu, var, rng = state
+  # epsilon = 0.001
+
+  def cond_fn(state):
+    t, best_cost, best_solution, mu, var, rng, args = state
+    return t < n_iterations
+    # return jnp.logical_and(t < n_iterations, jnp.max(var) > epsilon)
+
+  def loop(state):
+    t, best_cost, best_solution, mu, var, rng, args = state
     rng, key, key2 = jax.random.split(rng, 3)
     lb_dist = mu - lower_bound
     ub_dist = upper_bound - mu
-    mv = jnp.minimum(jnp.square(lb_dist / 2), jnp.square(ub_dist / 2))
-    constrained_var = jnp.minimum(mv, var)
+    constrained_var = jnp.minimum(
+        jnp.minimum(jnp.square(lb_dist / 2), jnp.square(ub_dist / 2)), var)
 
     population = jax.random.truncated_normal(key,
                                              lower=-2.,
@@ -43,29 +50,30 @@ def minimize_cem(fn: Callable,
       costs = fn(population, key2, *args)
     else:
       costs = fn(population, *args)
+    costs: jnp.ndarray = jnp.where(jnp.isnan(costs), 1e8, costs)
     chex.assert_shape(costs, (population_size,))
     _, elite_idx = lax.top_k(-costs, num_elites)
     elites = population[elite_idx]
     best_costs = costs[elite_idx]
 
     new_mu = jnp.mean(elites, axis=0)
-    new_var = jnp.var(elites, axis=0, ddof=1)
+    new_var = jnp.var(elites, axis=0)
     new_best_cost = jnp.where(best_costs[0] < best_cost, best_costs[0], best_cost)
     new_best_solution = jnp.where(best_costs[0] < best_cost, elites[0], best_solution)
     mu = alpha * mu + (1 - alpha) * new_mu
     var = alpha * var + (1 - alpha) * new_var
 
-    return (new_best_cost, new_best_solution, mu, var, rng)
+    return (t + 1, new_best_cost, new_best_solution, mu, var, rng, args)
 
   initial_var = jnp.square(upper_bound - lower_bound) / 16.
-  mu = x0
-  var = initial_var
+  initial_mu = x0
+  assert initial_var.shape == initial_mu.shape
   best_cost = jnp.inf
-  best_solution = jnp.empty_like(mu)
-  state = (best_cost, best_solution, mu, var, key)
+  best_solution = jnp.empty_like(initial_mu)
+  state = (0, best_cost, best_solution, initial_mu, initial_var, key, args)
   # TODO: expose intermediate results
-  _, best, mu, _, _ = lax.fori_loop(0, n_iterations, loop, state)
-  return mu if return_mean_elites else best
+  t, new_best_cost, best, mu, _, _, _ = jax.lax.while_loop(cond_fn, loop, state)
+  return mu if return_mean_elites else best, new_best_cost
 
 
 def minimize_random(fn: Callable,
@@ -91,4 +99,4 @@ def minimize_random(fn: Callable,
     costs = fn(population, subkey, *args)
   else:
     costs = fn(population, *args)
-  return population[jnp.argmin(costs)]
+  return population[jnp.argmin(costs)], ()

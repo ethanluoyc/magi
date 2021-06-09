@@ -1,0 +1,9 @@
+-f https://storage.googleapis.com/jax-releases/jax_releases.html
+jax
+jaxlib==0.1.65+cuda110
+git+https://github.com/deepmind/acme.git@master#egg=dm-acme[jax,reverb,envs,tf]
+tfp-nightly
+pandas
+wandb
+pybullet
+optax>=0.0.8
