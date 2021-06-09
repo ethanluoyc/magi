@@ -1,4 +1,5 @@
 from typing import List, NamedTuple
+from absl import logging
 
 from acme import core
 from acme.jax import utils
@@ -25,7 +26,7 @@ class EarlyStopping:
     verbose: verbosity mode.
   """
 
-  def __init__(self, min_delta: float = 0., patience: int = 0):
+  def __init__(self, min_delta: float = 0.01, patience: int = 0):
     self.patience = patience
     self.min_delta = abs(min_delta)
     self.wait = 0
@@ -36,9 +37,9 @@ class EarlyStopping:
     self.wait = 0
     self.stopped_epoch = 0
     self.best = np.Inf
-    self.best_weights = None
+    self.best_params = None
 
-  def update(self, current, epoch):
+  def update(self, current, epoch, params):
     if current is None:
       return False
 
@@ -46,6 +47,7 @@ class EarlyStopping:
     if self._is_improvement(current, self.best):
       print('Epoch {} New best {}, old {}'.format(epoch, current, self.best))
       self.best = current
+      self.best_params = params
       # If current is smaller the previous best, reset wait
       self.wait = 0
 
@@ -53,8 +55,10 @@ class EarlyStopping:
       return True
     return False
 
-  def _is_improvement(self, monitor_value, reference_value):
-    return np.less(monitor_value, reference_value - self.min_delta)
+  def _is_improvement(self, val_loss, best_val_loss):
+    improvement = (best_val_loss - val_loss) / best_val_loss
+    improved = (improvement > self.min_delta).any().item()
+    return improved
 
 
 class TraningState(NamedTuple):
@@ -77,6 +81,7 @@ class ModelBasedLearner(core.Learner):
       seed: int = 1,
       min_delta=0.1,
       patience=5,
+      val_ratio=0,
       logger: loggers.Logger = None,
       counter: counting.Counter = None,
   ):
@@ -84,7 +89,9 @@ class ModelBasedLearner(core.Learner):
     self.dataset = dataset
     self.batch_size = batch_size
     self.num_epochs = num_epochs
+    self._val_ratio = val_ratio
     self._early_stopper = EarlyStopping(min_delta=min_delta, patience=patience)
+    self._rng = np.random.default_rng(seed + 1)
 
     def init():
       params = model_init_fn(
@@ -124,20 +131,25 @@ class ModelBasedLearner(core.Learner):
 
   def _train_model(self, dataset):
     # At the end of the episode, train the dynamics model
-    train_iterator, val_iterator = dataset.get_iterators(self.batch_size, val_ratio=0)
-    if val_iterator is not None:
-      self._early_stopper.reset()
+    train_iterator, val_iterator = dataset.get_iterators(self.batch_size,
+                                                         val_ratio=self._val_ratio,
+                                                         rng=self._rng)
+    if val_iterator is None:
+      val_iterator = train_iterator
+    self._early_stopper.reset()
     for epoch in range(self.num_epochs):
       # Train
       for batch in train_iterator:
         self._state, _ = self._update(self._state, batch.o_tm1, batch.a_t, batch.o_t)
       # Evaluate on validation set
-      if val_iterator is not None:
-        validation_loss = self._evaluate(self._state.params, val_iterator)
-        should_stop = self._early_stopper.update(validation_loss, epoch)
-        if should_stop:
-          print('Early stopping')
-          break
+      validation_loss = self._evaluate(self._state.params, val_iterator)
+      should_stop = self._early_stopper.update(validation_loss, epoch,
+                                               self._state.params)
+      if should_stop:
+        logging.info('Early stopped training at epoch %d, %f', epoch, validation_loss)
+        break
+    if self._early_stopper.best_params is not None:
+      self._state = self._state._replace(params=self._early_stopper.best_params)
     # self._logger.write({"epoch": epoch, "validation_loss": validation_loss})
 
   def get_variables(self, names: List[str]) -> List[hk.Params]:

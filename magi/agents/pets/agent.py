@@ -22,8 +22,7 @@ class ModelBasedAgent(core.Actor):
     self._actor.observe(action, next_timestep)
     self._last_timestep = next_timestep
 
-  def update(self):
-    # Perform update at the end of an episode.
+  def update(self, wait=True):
     if self._last_timestep.last():
       self._learner.step()
-      self._actor.update()
+      self._actor.update(wait)

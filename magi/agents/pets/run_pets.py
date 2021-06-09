@@ -7,6 +7,7 @@ from acme import specs
 from acme.utils import loggers
 from acme import wrappers
 from gym.wrappers.time_limit import TimeLimit
+import jax.numpy as jnp
 
 from magi.agents.pets import builder
 from magi.agents.pets.cartpole import CartpoleEnv
@@ -31,11 +32,14 @@ def main(unused_argv):
   config = cartpole_config
   agent = builder.make_agent(environment_spec,
                              config.cost_fn,
+                             lambda x, a: jnp.zeros((a.shape[0]), dtype=jnp.bool_),
                              config.obs_preproc,
                              config.obs_postproc,
                              config.targ_proc,
-                             "cem",
-                             hidden_sizes=(128, 128, 128))
+                             optimizer="cem",
+                             num_ensembles=1,
+                             hidden_sizes=(128, 128, 128),
+                             population_size=500)
 
   env_loop_logger = loggers.TerminalLogger(label="environment_loop")
   env_loop = environment_loop.EnvironmentLoop(environment,

@@ -97,13 +97,19 @@ class Dataset:
     if shuffle:
       rng.shuffle(ind)
     if val_size == 0:
-      train_iterator = TransitionIterator(transition[ind], batch_size=batch_size)
+      train_iterator = TransitionIterator(transition[ind],
+                                          batch_size=batch_size,
+                                          rng=rng)
       return train_iterator, None
     else:
       train_ind = ind[:train_size]
       val_ind = ind[train_size:]
-      train_iterator = TransitionIterator(transition[train_ind], batch_size=batch_size)
-      val_iterator = TransitionIterator(transition[val_ind], batch_size=batch_size)
+      train_iterator = TransitionIterator(transition[train_ind],
+                                          batch_size=batch_size,
+                                          rng=rng)
+      val_iterator = TransitionIterator(transition[val_ind],
+                                        batch_size=batch_size,
+                                        rng=rng)
       return train_iterator, val_iterator
 
   def reset(self):

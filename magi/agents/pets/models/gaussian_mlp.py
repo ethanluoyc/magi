@@ -34,11 +34,9 @@ class GaussianMLP(hk.Module):
     self.output_size = output_size
     self.mlp = hk.nets.MLP(hidden_sizes, activation=activation, activate_final=True)
     self.min_logvar = hk.get_parameter('min_logvar', (output_size,),
-                                       init=hk.initializers.Constant(output_size // 2
-                                                                     * min_logvar))
+                                       init=hk.initializers.Constant(min_logvar))
     self.max_logvar = hk.get_parameter('max_logvar', (output_size,),
-                                       init=hk.initializers.Constant(output_size // 2
-                                                                     * max_logvar))
+                                       init=hk.initializers.Constant(max_logvar))
     self.linear_mean = hk.Linear(self.output_size, name='mean')
     self.linear_logvar = hk.Linear(self.output_size, name='logvar')
 

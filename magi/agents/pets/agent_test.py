@@ -28,6 +28,10 @@ def ac_cost_fn(acs):
   return 0.01 * jnp.sum(jnp.square(acs), axis=-1)
 
 
+def terminal_fn(obs, act):
+  return jnp.zeros(obs.shape[0], dtype=jnp.bool_)
+
+
 def cost_fn(obs, acs):
   return obs_cost_fn(obs) + ac_cost_fn(acs)
 
@@ -54,8 +58,11 @@ class PetsTest(parameterized.TestCase):
                                               episode_length=10,
                                               bounded=True)
     spec = specs.make_environment_spec(environment)
-    agent = builder.make_agent(spec, cost_fn, obs_preproc, obs_postproc, targ_proc,
-                               optimizer)
+    agent = builder.make_agent(spec, cost_fn, terminal_fn, obs_preproc, obs_postproc,
+                               targ_proc,
+                               optimizer=optimizer,
+                               hidden_sizes=[10],
+                               population_size=100)
     env_loop = acme.EnvironmentLoop(environment, agent)
     env_loop.run(num_episodes=2)
 
