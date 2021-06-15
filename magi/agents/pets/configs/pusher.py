@@ -1,9 +1,13 @@
 from typing import Callable
+
+import dataclasses
+
 import jax.numpy as np
 from magi.agents.pets.configs.default import Config
 import jax
 
 
+@dataclasses.dataclass
 class PusherConfig(Config):
   task_horizon: int = 150
   time_horizon: int = 25

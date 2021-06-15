@@ -1,9 +1,13 @@
 from typing import Callable, Sequence
+
+import dataclasses
+
 import jax.numpy as jnp
 import jax
 from magi.agents.pets.configs.default import Config
 
 
+@dataclasses.dataclass
 class CartPoleConfig(Config):
   task_horizon: int = 200
   hidden_sizes: Sequence[int] = (200, 200, 200)

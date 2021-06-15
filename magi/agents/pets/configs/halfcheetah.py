@@ -1,14 +1,17 @@
 from typing import Callable, Sequence
 
+import dataclasses
+
 import jax
 import jax.numpy as jnp
 
 from magi.agents.pets.configs.default import Config
 
 
+@dataclasses.dataclass
 class HalfCheetahConfig(Config):
   task_horizon: int = 1000
-  hidden_sizes: Sequence[int] = (200, 200, 200)
+  hidden_sizes: Sequence[int] = (200, 200, 200, 200)
   population_size: int = 500
   activation: Callable = jax.nn.silu
   time_horizon: float = 30
@@ -22,6 +25,10 @@ class HalfCheetahConfig(Config):
   num_particles: int = 20
   num_epochs: int = 25
   patience: int = 25
+
+  def get_goal(self, env):
+    # Cheetah does not have a goal
+    del env
 
   @staticmethod
   def obs_preproc(state):
@@ -64,5 +71,6 @@ class HalfCheetahConfig(Config):
     return 0.1 * (acs**2).sum(axis=1)
 
   @staticmethod
-  def cost_fn(obs, acs):
+  def cost_fn(obs, acs, goal):
+    del goal
     return HalfCheetahConfig.obs_cost_fn(obs) + HalfCheetahConfig.ac_cost_fn(acs)

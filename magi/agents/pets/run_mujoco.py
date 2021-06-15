@@ -21,7 +21,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_bool("wandb", False, "whether to log result to wandb")
 flags.DEFINE_string("wandb_project", "magi", "wandb project name")
 flags.DEFINE_string("wandb_entity", "ethanluoyc", "wandb project entity")
-flags.DEFINE_string("env", "reacher", "environment")
+flags.DEFINE_string("env", "halfcheetah", "environment")
 flags.DEFINE_integer("num_episodes", int(100), "Number of episodes.")
 flags.DEFINE_integer("seed", 0, "Random seed.")
 

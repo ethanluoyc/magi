@@ -1,7 +1,10 @@
+import dataclasses
+
 import jax.numpy as np
 from magi.agents.pets.configs.default import Config
 
 
+@dataclasses.dataclass
 class ReacherConfig(Config):
   task_horizon = 150
   time_horizon: int = 25
