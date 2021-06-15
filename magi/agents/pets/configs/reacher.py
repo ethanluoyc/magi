@@ -1,13 +1,22 @@
 import dataclasses
+from typing import Callable
 
+import jax
 import jax.numpy as np
+
 from magi.agents.pets.configs.default import Config
 
 
 @dataclasses.dataclass
 class ReacherConfig(Config):
   task_horizon = 150
-  time_horizon: int = 25
+  planning_horizon: int = 25
+  activation: Callable = jax.nn.swish
+  lr: float = 7.5e-4
+  weight_decay: float = 5e-4
+  population_size: int = 400
+  num_epochs: int = 5
+  patience: int = 5
 
   @staticmethod
   def get_goal(env):

@@ -10,7 +10,7 @@ class Config:
   hidden_sizes: Sequence[int] = (200, 200, 200)
   population_size: int = 500
   activation: Callable = jax.nn.silu
-  time_horizon: float = 15
+  planning_horizon: int = 15
   cem_alpha: float = 0.1
   cem_elite_frac: float = 0.1
   cem_return_mean_elites: bool = True

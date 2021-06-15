@@ -29,10 +29,12 @@ def ac_cost_fn(acs):
 
 
 def terminal_fn(obs, act, goal):
+  del act, goal
   return jnp.zeros(obs.shape[0], dtype=jnp.bool_)
 
 
 def cost_fn(obs, acs, goal):
+  del goal
   return obs_cost_fn(obs) + ac_cost_fn(acs)
 
 

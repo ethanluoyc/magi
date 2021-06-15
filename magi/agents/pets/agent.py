@@ -26,3 +26,6 @@ class ModelBasedAgent(core.Actor):
     if self._last_timestep.last():
       self._learner.step()
       self._actor.update(wait)
+
+  def update_goal(self, goal):
+    self._actor.update_goal(goal)

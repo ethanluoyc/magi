@@ -4,7 +4,6 @@ import chex
 import haiku as hk
 import jax
 import jax.numpy as jnp
-from jax import lax
 import numpy as onp
 import tree
 
@@ -23,6 +22,15 @@ class Normalizer:
     return (inputs - self.mean) / (self.std)
 
 
+def gaussian_nll(pred_mean, pred_logvar, target) -> jnp.ndarray:
+  """Negative Gaussian log-likelihood."""
+  inv_var = jnp.exp(-pred_logvar)
+  assert pred_mean.shape == target.shape == pred_logvar.shape
+  mse_loss = jnp.square(pred_mean - target)
+  logp_loss = mse_loss * inv_var + pred_logvar
+  return logp_loss
+
+
 class EnsembleModel:
 
   def __init__(self,
@@ -37,25 +45,21 @@ class EnsembleModel:
     self._process_target = process_target
     self._num_ensembles = num_ensembles
 
-    def gaussian_nll(params, normalizer, x, a, xnext) -> jnp.ndarray:
+    def loss(params, normalizer, x, a, xnext) -> jnp.ndarray:
       """Compute the loss of the network, including L2."""
       proc_x = preprocess_obs(x)
       inputs = jnp.concatenate([proc_x, a], axis=-1)
       inputs = normalizer(inputs)
       mean, logvar = self._network.apply(params, inputs)
       target = process_target(x, xnext)
-      inv_var = jnp.exp(-logvar)
-      assert mean.shape == target.shape == logvar.shape
-      mse_loss = jnp.square(mean - target)
-      logp_loss = mse_loss * inv_var + logvar
-      # mean along batch and output dimension
-      # logp_loss = logp_loss.mean(-1).mean(-1)
-      return logp_loss
+      return gaussian_nll(mean, logvar, target)
 
     def batched_loss(ensem_params, normalizer, x, a, xnext) -> jnp.ndarray:
       """Compute the loss of the network, including L2."""
-      nll_loss = jax.vmap(gaussian_nll, (0, None, 0, 0, 0))(ensem_params, normalizer, x,
-                                                            a, xnext)
+      nll_loss = jax.vmap(loss, (0, None, 0, 0, 0))(ensem_params, normalizer, x, a,
+                                                    xnext)
+      # This is consistent with mbrl-lib,
+      # which averages over the batch and event dims and sum over the ensembles
       return nll_loss.mean(axis=(1, 2)).sum()
 
     def evaluate(params, normalizer, x, a, xnext) -> jnp.ndarray:
@@ -86,7 +90,7 @@ class EnsembleModel:
       return losses
 
     self._loss_fn = batched_loss
-    self._loss_eval = batched_eval
+    self._eval_fn = batched_eval
 
   @property
   def num_ensembles(self):
@@ -104,6 +108,13 @@ class EnsembleModel:
     mean = jnp.zeros(inputs.shape[-1], dtype=jnp.float32)
     std = jnp.ones(inputs.shape[-1], dtype=jnp.float32)
     return ensem_params, Normalizer(mean=mean, std=std)
+
+  def apply(self, params, normalizer, x, a):
+    proc_x = self._preprocess_obs(x)
+    inputs = jnp.concatenate([proc_x, a], axis=-1)
+    inputs = normalizer(inputs)
+    mean, logvar = jax.vmap(self._network.apply, (0, None))(params, inputs)
+    return mean, logvar
 
   def update_normalizer(self, x, a, xnext):
     del xnext
@@ -133,16 +144,24 @@ class EnsembleModel:
 
   @functools.partial(jax.jit, static_argnums=(0,))
   def evaluate(self, params, state, observation, action, next_observation):
-    return self._loss_eval(params, state, observation, action, next_observation)
+    return self._eval_fn(params, state, observation, action, next_observation)
 
 
 class ModelEnv:
 
-  def __init__(self, network, obs_preprocess, obs_postprocess, shuffle=True):
+  def __init__(self,
+               network,
+               obs_preprocess,
+               obs_postprocess,
+               cost_fn,
+               terminal_fn,
+               shuffle=True):
     self._network = hk.without_apply_rng(hk.transform(network))
     self._obs_preprocess = obs_preprocess
     self._obs_postprocess = obs_postprocess
     self._shuffle = shuffle
+    self._cost_fn = cost_fn
+    self._terminal_fn = terminal_fn
 
   def reset(self, ensem_params, normalizer, key, observations):
     num_ensembles = tree.flatten(ensem_params)[0].shape[0]
@@ -154,11 +173,11 @@ class ModelEnv:
       indices = jax.random.permutation(key, indices)
     return (normalizer, indices)
 
-  def step(self, ensem_params, state, key, observations, actions):
+  def step(self, ensem_params, normalizer, shuffle_indices, key, observations, actions,
+           goal):
     # TODO(yl): Add sampling propagation indices instead of being fully deterministic
     assert observations.ndim == 2
     assert actions.ndim == 2
-    normalizer, shuffle_indices = state
     batch_size = observations.shape[0]
 
     shuffled_observations = observations[shuffle_indices]
@@ -174,35 +193,50 @@ class ModelEnv:
       raise NotImplementedError(
           f'Ragged batch not supported. ({batch_size} % {num_ensembles} == {ragged})')
     reshaped_inputs = tree.map_structure(
-        lambda x: x.reshape((num_ensembles, new_batch_size, *x.shape[1:])),
+        lambda x: x.reshape((num_ensembles, new_batch_size, x.shape[-1])),
         normalized_inputs)
     mean, logvar = jax.vmap(self._network.apply, in_axes=(0, 0))(ensem_params,
                                                                  reshaped_inputs)
-    # hcb.id_print((mean[0, 0], logvar[0, 0]), what='in')
     std = jnp.exp(logvar * 0.5)
     mean, std = tree.map_structure(lambda x: x.reshape((batch_size, mean.shape[-1])),
                                    (mean, std))
-    shuffled_predictions = jax.random.normal(key, shape=mean.shape) * std + mean
-    shuffled_output = self._obs_postprocess(shuffled_observations, shuffled_predictions)
     # Shuffle back
-    output = jax.ops.index_update(shuffled_output, shuffle_indices, shuffled_output)
-    return output
+    mean = jax.ops.index_update(mean, shuffle_indices, mean)
+    std = jax.ops.index_update(std, shuffle_indices, std)
+    # shuffled_predictions = jax.random.normal(key, shape=mean.shape) * std + mean
+    predictions = jax.random.normal(key, shape=mean.shape) * std + mean
+    output = self._obs_postprocess(observations, predictions)
+    return output, self._cost_fn(output, actions,
+                                 goal), self._terminal_fn(output, actions, goal)
 
-  def unroll(self, params, state, rng, x_init, actions):
+  def unroll(self, params, normalizer, rng, initial_state, action_sequences, goal,
+             num_particles: int):
     """Unroll model along a sequence of actions.
     Args:
       ensem_params: hk.Params.
       rng: JAX random key.
       x_init [B, D]
-      actions [T, B, A]
+      actions [B, T, A]
     """
-    rng, rng_init = jax.random.split(rng)
-    state = self.reset(params, state, rng_init, x_init)
-
-    def step(input_, a_t):
-      rng, x_t, params, state = input_
+    population_size, horizon, _ = action_sequences.shape
+    initial_obs_batch = jnp.tile(
+        initial_state, (num_particles * population_size, 1)).astype(jnp.float32)
+    rng, rng_reset = jax.random.split(rng)
+    normalizer, propagation_id = self.reset(params, normalizer, rng_reset,
+                                            initial_obs_batch)
+    batch_size = initial_obs_batch.shape[0]
+    total_costs = jnp.zeros((batch_size))
+    terminated = jnp.zeros((batch_size), dtype=jnp.bool_)
+    obs = initial_obs_batch
+    for t in range(horizon):
       rng, rng_step = jax.random.split(rng)
-      x_tp1 = self.step(params, state, rng_step, x_t, a_t)
-      return (rng, x_tp1, params, state), x_tp1
+      actions_for_step = action_sequences[:, t, :]
+      action_batch = jnp.repeat(actions_for_step, num_particles, axis=0)
+      obs, costs, dones = self.step(params, normalizer, propagation_id, rng_step, obs,
+                                    action_batch, goal)
+      costs = jnp.where(terminated, 0, costs)
+      terminated = (dones | terminated)
+      total_costs = total_costs + costs
 
-    return lax.scan(step, (rng, x_init, params, state), actions)
+    total_costs = total_costs.reshape(-1, num_particles)
+    return total_costs.mean(axis=1)

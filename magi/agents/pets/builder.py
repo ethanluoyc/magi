@@ -1,4 +1,5 @@
 from acme.jax import variable_utils
+import numpy as np
 from acme import specs
 import jax
 import tensorflow_probability as tfp
@@ -6,7 +7,7 @@ import optax
 
 from magi.agents.pets import acting
 from magi.agents.pets.agent import ModelBasedAgent
-from magi.agents.pets.dataset import ReplayBuffer
+from magi.agents.pets.replay import ReplayBuffer
 from magi.agents.pets.learning import ModelBasedLearner
 from magi.agents.pets import models
 
@@ -48,7 +49,7 @@ def make_agent(
     max_logvar=0.5,
     num_ensembles=5,
     batch_size=32,
-    time_horizon=25,
+    planning_horizon=25,
     lr=1e-3,
     num_epochs=100,
     seed=1,
@@ -64,16 +65,17 @@ def make_agent(
     cem_alpha=0.1,
     cem_return_mean_elites=True,
     num_particles=20,
+    replay_capacity=int(1e6),
     logger=None,
     counter=None,
 ):
   rng = jax.random.PRNGKey(seed)
-  dataset = ReplayBuffer(
-      int(1e6),
-      obs_shape=environment_spec.observations.shape,
-      action_shape=environment_spec.actions.shape,
-      max_trajectory_length=1000,
-  )
+  actor_rng, learner_rng, replay_rng = jax.random.split(rng, 3)
+  replay = ReplayBuffer(replay_capacity,
+                        obs_shape=environment_spec.observations.shape,
+                        action_shape=environment_spec.actions.shape,
+                        rng=np.random.default_rng(
+                            int(jax.random.randint(replay_rng, (), 0, 2**31 - 1))))
   network = make_network(environment_spec,
                          hidden_sizes,
                          activation=activation,
@@ -83,14 +85,17 @@ def make_agent(
   # Create an ensemble model
   model = models.EnsembleModel(network, obs_preprocess, obs_postprocess, target_process,
                                num_ensembles)
-  learner_rng, actor_rng = jax.random.split(rng)
-  opt = optax.adamw(lr, weight_decay=weight_decay, eps=1e-5)
+  opt = optax.chain(
+      optax.add_decayed_weights(weight_decay),
+      optax.scale_by_adam(),
+      optax.scale(-lr),
+  )
 
   # Create a learner
   learner = ModelBasedLearner(
       environment_spec,
       model,
-      dataset,
+      replay,
       opt,
       batch_size=batch_size,
       num_epochs=num_epochs,
@@ -103,19 +108,18 @@ def make_agent(
   )
 
   # Create actor
-  model_env = models.ModelEnv(network, obs_preprocess, obs_postprocess)
+  model_env = models.ModelEnv(network, obs_preprocess, obs_postprocess, cost_fn,
+                              terminal_fn)
   variable_client = variable_utils.VariableClient(learner, '')
 
   if optimizer == 'cem':
     actor = acting.CEMOptimizerActor(
         environment_spec,
         model_env,
-        cost_fn,
-        terminal_fn,
-        dataset,
+        replay,
         variable_client,
-        pop_size=population_size,
-        time_horizon=time_horizon,
+        population_size=population_size,
+        planning_horizon=planning_horizon,
         n_iterations=cem_iterations,
         elite_frac=cem_elite_frac,
         alpha=cem_alpha,
@@ -126,12 +130,10 @@ def make_agent(
   elif optimizer == 'random':
     actor = acting.RandomOptimizerActor(environment_spec,
                                         model_env,
-                                        cost_fn,
-                                        terminal_fn,
-                                        dataset,
+                                        replay,
                                         variable_client,
                                         num_samples=population_size,
-                                        time_horizon=time_horizon,
+                                        planning_horizon=planning_horizon,
                                         num_particles=num_particles,
                                         seed=actor_rng)
 

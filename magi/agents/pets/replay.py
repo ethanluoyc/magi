@@ -78,8 +78,8 @@ class TransitionIterator:
     Args:
 
         batch_size (int): the batch size to use when iterating over the stored data.
-        shuffle_each_epoch (bool): if ``True`` the iteration order is shuffled everytime a
-            loop over the data is completed. Defaults to ``False``.
+        shuffle_each_epoch (bool): if ``True`` the iteration order is shuffled every
+        time a loop over the data is completed. Defaults to ``False``.
         rng (np.random.Generator, optional): a random number generator when sampling
             batches. If None (default value), a new default generator will be used.
     """
@@ -118,6 +118,7 @@ class TransitionIterator:
   def __next__(self):
     return self.transitions[self._get_indices_next_batch()]
 
+  @property
   def ensemble_size(self):
     return 0
 
@@ -127,14 +128,14 @@ class TransitionIterator:
 
 class BootstrapIterator(TransitionIterator):
   """A transition iterator that can be used to train ensemble of bootstrapped models.
-    When iterating, this iterator samples from a different set of indices for each 
-    model in the ensemble, essentially assigning a different dataset to each model. 
+    When iterating, this iterator samples from a different set of indices for each
+    model in the ensemble, essentially assigning a different dataset to each model.
     Each batch is of shape (ensemble_size x batch_size x obs_size).
     Args:
         batch_size (int): the batch size to use when iterating over the stored data.
         ensemble_size (int): the number of models in the ensemble.
-        shuffle_each_epoch (bool): if ``True`` the iteration order is shuffled everytime a
-            loop over the data is completed. Defaults to ``False``.
+        shuffle_each_epoch (bool): if ``True`` the iteration order is shuffled every
+        time a loop over the data is completed. Defaults to ``False``.
         permute_indices (boot): if ``True`` the bootstrap datasets are just
             permutations of the original data. If ``False`` they are sampled with
             replacement. Defaults to ``True``.
@@ -340,9 +341,10 @@ class ReplayBuffer:
             batch_size (int): the number of samples required.
 
         Returns:
-            (tuple): the sampled values of observations, actions, next observations, rewards
-            and done indicators, as numpy arrays, respectively. The i-th transition corresponds
-            to (obs[i], act[i], next_obs[i], rewards[i], dones[i]).
+            (tuple): the sampled values of observations, actions, next observations,
+            rewards and done indicators, as numpy arrays, respectively.
+            The i-th transition corresponds to
+            (obs[i], act[i], next_obs[i], rewards[i], dones[i]).
         """
     indices = self._rng.choice(self.num_stored, size=batch_size)
     return self._batch_from_indices(indices)

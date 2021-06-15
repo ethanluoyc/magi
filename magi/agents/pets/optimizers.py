@@ -4,7 +4,6 @@ import chex
 import jax
 from jax import lax
 import jax.numpy as jnp
-import jax.experimental.host_callback as hcb
 
 
 def minimize_cem(fn: Callable,
@@ -22,14 +21,12 @@ def minimize_cem(fn: Callable,
   """Minimize a function `fn` using the cross-entropy method."""
   num_elites = int(population_size * elite_fraction)
   lower_bound, upper_bound = bounds
-  action_shape = x0.shape
+  input_shape = x0.shape
 
-  population_shape = (population_size,) + action_shape
-
-  # epsilon = 0.001
+  population_shape = (population_size,) + input_shape
 
   def cond_fn(state):
-    t, best_cost, best_solution, mu, var, rng, args = state
+    t = state[0]
     return t < n_iterations
     # return jnp.logical_and(t < n_iterations, jnp.max(var) > epsilon)
 
@@ -50,8 +47,10 @@ def minimize_cem(fn: Callable,
       costs = fn(population, key2, *args)
     else:
       costs = fn(population, *args)
-    costs: jnp.ndarray = jnp.where(jnp.isnan(costs), 1e8, costs)
+    costs: jnp.ndarray = jnp.where(~jnp.isfinite(costs), 1e10, costs)
     chex.assert_shape(costs, (population_size,))
+    # false-positive linting error
+    # pylint: disable=invalid-unary-operand-type
     _, elite_idx = lax.top_k(-costs, num_elites)
     elites = population[elite_idx]
     best_costs = costs[elite_idx]
@@ -60,8 +59,8 @@ def minimize_cem(fn: Callable,
     new_var = jnp.var(elites, axis=0)
     new_best_cost = jnp.where(best_costs[0] < best_cost, best_costs[0], best_cost)
     new_best_solution = jnp.where(best_costs[0] < best_cost, elites[0], best_solution)
-    mu = alpha * mu + (1 - alpha) * new_mu
-    var = alpha * var + (1 - alpha) * new_var
+    mu = alpha * mu + (1.0 - alpha) * new_mu
+    var = alpha * var + (1.0 - alpha) * new_var
 
     return (t + 1, new_best_cost, new_best_solution, mu, var, rng, args)
 
@@ -71,8 +70,13 @@ def minimize_cem(fn: Callable,
   best_cost = jnp.inf
   best_solution = jnp.empty_like(initial_mu)
   state = (0, best_cost, best_solution, initial_mu, initial_var, key, args)
+
+  for _ in range(n_iterations):
+    state = loop(state)
+
+  _, new_best_cost, best, mu, _, _, _ = state
   # TODO: expose intermediate results
-  t, new_best_cost, best, mu, _, _, _ = jax.lax.while_loop(cond_fn, loop, state)
+  # _, new_best_cost, best, mu, _, _, _ = jax.lax.while_loop(cond_fn, loop, state)
   return mu if return_mean_elites else best, new_best_cost
 
 

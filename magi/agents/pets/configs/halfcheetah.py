@@ -12,9 +12,9 @@ from magi.agents.pets.configs.default import Config
 class HalfCheetahConfig(Config):
   task_horizon: int = 1000
   hidden_sizes: Sequence[int] = (200, 200, 200, 200)
-  population_size: int = 500
+  population_size: int = 350
   activation: Callable = jax.nn.silu
-  time_horizon: float = 30
+  planning_horizon: int = 30
   cem_alpha: float = 0.1
   cem_elite_frac: float = 0.1
   cem_return_mean_elites: bool = True
