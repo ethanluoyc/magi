@@ -4,7 +4,6 @@ from acme import core
 import dm_env
 import haiku as hk
 import jax
-from jax import lax
 import jax.numpy as jnp
 import numpy as np
 import tree
@@ -17,24 +16,58 @@ import tensorflow_probability as tfp
 tfd = tfp.experimental.substrates.jax.distributions
 
 
-def _unroll(init_fn, forward_fn, params, state, rng, x_init, actions):
-  """Unroll model along a sequence of actions.
-  Args:
-    ensem_params: hk.Params.
-    rng: JAX random key.
-    x_init [B, D]
-    actions [T, B, A]
-  """
-  rng, rng_init = jax.random.split(rng)
-  state = init_fn(params, state, rng_init, x_init)
+def _make_trajectory_cost_fn(model, num_particles, cost_fn, terminal_fn):
+  """Make stochastic cost function used by random optimizer or cem."""
 
-  def step(input_, a_t):
-    rng, x_t, params, state = input_
-    rng, rng_step = jax.random.split(rng)
-    x_tp1 = forward_fn(params, state, rng_step, x_t, a_t)
-    return (rng, x_tp1, params, state), x_tp1
+  def cost(actions, key, params, state, x_init, goal):
+    """Objective function for trajectory planning.
+    Args:
+      actions: [B, T, A]
+      x_init: [D]
+      params, key, num_particles
+    """
+    batch_size = actions.shape[0]
+    horizon = actions.shape[1]
+    # [P, B, D]
+    xinit_particles = jnp.broadcast_to(x_init,
+                                       (num_particles, batch_size) + x_init.shape)
+    # [P * B, D]
+    xinit_particles = jnp.reshape(xinit_particles, (num_particles * batch_size, -1))
+    # [P, B, T, A]
+    actions = jnp.broadcast_to(actions, (num_particles,) + actions.shape)
+    # [P * B, T, A]
+    actions = jnp.reshape(actions, (num_particles * batch_size, horizon, -1))
+    # actions now have shape [T, P * B, A]
+    actions = jnp.swapaxes(actions, 0, 1)
+    # unrolled_states has shape [T, P * B, D]
+    # TODO(yl): Consider extracting this to a separate class
+    # output is [T, P * B, D]
+    _, unrolled_states = model.unroll(params, state, key, xinit_particles, actions)
+    # costs, dones is [T, P * B],
+    # map across time horizon to get per-step costs
+    # this should be more efficient than computing the cost in unroll
+    # goal_cost_fn = functools.partial(cost_fn, goal=goal)
+    # goal_terminal_fn = functools.partial(terminal_fn, goal=goal)
+    costs = jax.vmap(cost_fn, in_axes=(0, 0, None))(unrolled_states, actions, goal)
+    # import jax.experimental.host_callback as hcb
+    # hcb.id_print(costs[:, 0], what="costs")
+    dones = jax.vmap(terminal_fn, in_axes=(0, 0, None))(unrolled_states, actions, goal)
+    costs, dones = tree.map_structure(
+        lambda x: x.reshape((horizon, num_particles, batch_size)), (costs, dones))
+    total_costs = jnp.zeros((
+        num_particles,
+        batch_size,
+    ))
+    terminated = jnp.zeros((num_particles, batch_size), dtype=jnp.bool_)
+    for t in range(horizon):
+      c_t = costs[t]
+      c_t = jnp.where(terminated, 0, c_t)
+      # print(c_t)
+      terminated = jnp.logical_or(dones[t], terminated)
+      total_costs = total_costs + c_t
+    return jnp.mean(total_costs, axis=0)
 
-  return lax.scan(step, (rng, x_init, params, state), actions)
+  return cost
 
 
 class OptimizerBasedActor(core.Actor):
@@ -42,7 +75,7 @@ class OptimizerBasedActor(core.Actor):
   def __init__(
       self,
       spec,
-      forward_fn,
+      model,
       cost_fn,
       terminal_fn,
       dataset: ReplayBuffer,
@@ -63,59 +96,7 @@ class OptimizerBasedActor(core.Actor):
     self._num_episodes_seen = 0
     self._goal = None
 
-    init_fn, forward_fn = forward_fn
-
-    def model_cost_fn(actions, key, params, state, x_init, goal):
-      """Objective function for trajectory planning.
-      Args:
-        actions: [B, T, A]
-        x_init: [D]
-        params, key, num_particles
-      """
-      batch_size = actions.shape[0]
-      horizon = actions.shape[1]
-      # [P, B, D]
-      xinit_particles = jnp.broadcast_to(x_init,
-                                         (num_particles, batch_size) + x_init.shape)
-      # [P * B, D]
-      xinit_particles = jnp.reshape(xinit_particles, (num_particles * batch_size, -1))
-      # [P, B, T, A]
-      actions = jnp.broadcast_to(actions, (num_particles,) + actions.shape)
-      # [P * B, T, A]
-      actions = jnp.reshape(actions, (num_particles * batch_size, horizon, -1))
-      # actions now have shape [T, P * B, A]
-      actions = jnp.swapaxes(actions, 0, 1)
-      # unrolled_states has shape [T, P * B, D]
-      # TODO(yl): Consider extracting this to a separate class
-      # output is [T, P * B, D]
-      _, unrolled_states = _unroll(init_fn, forward_fn, params, state, key,
-                                   xinit_particles, actions)
-      # costs, dones is [T, P * B],
-      # map across time horizon to get per-step costs
-      # this should be more efficient than computing the cost in unroll
-      # goal_cost_fn = functools.partial(cost_fn, goal=goal)
-      # goal_terminal_fn = functools.partial(terminal_fn, goal=goal)
-      costs = jax.vmap(cost_fn, in_axes=(0, 0, None))(unrolled_states, actions, goal)
-      # import jax.experimental.host_callback as hcb
-      # hcb.id_print(costs[:, 0], what="costs")
-      dones = jax.vmap(terminal_fn, in_axes=(0, 0, None))(unrolled_states, actions,
-                                                          goal)
-      costs, dones = tree.map_structure(
-          lambda x: x.reshape((horizon, num_particles, batch_size)), (costs, dones))
-      total_costs = jnp.zeros((
-          num_particles,
-          batch_size,
-      ))
-      terminated = jnp.zeros((num_particles, batch_size), dtype=jnp.bool_)
-      for t in range(horizon):
-        c_t = costs[t]
-        c_t = jnp.where(terminated, 0, c_t)
-        # print(c_t)
-        terminated = jnp.logical_or(dones[t], terminated)
-        total_costs = total_costs + c_t
-      return jnp.mean(total_costs, axis=0)
-
-    self.cost_fn = model_cost_fn
+    self.cost_fn = _make_trajectory_cost_fn(model, num_particles, cost_fn, terminal_fn)
     self._client = variable_client
     self.dataset = dataset
     self._extras = None
@@ -146,7 +127,6 @@ class OptimizerBasedActor(core.Actor):
     key = next(self._rng)
     actions, extras = self._controller_fn(self.cost_fn, params, normalizer, observation,
                                           self._last_actions, key, self._goal)
-    # logging.info('Post opt best costs %f', extras)
     self._extras = extras
     self._last_actions = np.asarray(actions)
     return np.array(actions[0])
@@ -157,18 +137,15 @@ class OptimizerBasedActor(core.Actor):
 
   def observe(self, action: np.ndarray, next_timestep: dm_env.TimeStep):
     # Add a transition to the dataset
-    self.dataset.add(self._last_timestep.observation,
-                     action,
-                     next_timestep.observation,
-                     next_timestep.reward,
-                     next_timestep.last())
+    self.dataset.add(self._last_timestep.observation, action, next_timestep.observation,
+                     next_timestep.reward, next_timestep.last())
     # Update the last observation
     self._last_timestep = next_timestep
     # TODO use initial solution
     self._last_actions = np.roll(self._last_actions, -1)
     self._last_actions[:-1] = self._initial_solution[0]
     if next_timestep.last():
-      print("Final planning cost", self._extras)
+      logging.info('Final planning cost %.3f', self._extras)
       self._num_episodes_seen += 1
 
   def update(self, wait=True):
