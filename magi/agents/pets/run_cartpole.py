@@ -4,39 +4,23 @@
 from absl import app
 from acme import environment_loop
 from acme import specs
-from acme.utils import loggers
 from acme import wrappers
+from acme.utils import loggers
+from gym.wrappers import TimeLimit
 import jax
 
 from magi.agents.pets import builder
-from gym.wrappers import TimeLimit
+from magi.agents.pets.configs import cartpole_continuous as config
 from magi.environments.cartpole_continuous import CartPoleEnv
-from magi.environments import reward_fns
-from magi.environments import termination_fns
-# import jax.numpy as jnp
 
 SEED = 2
-
-def obs_preproc(obs):
-  return obs
-  # return jnp.concatenate(
-  #     [jnp.sin(obs[:, 1:2]),
-  #      jnp.cos(obs[:, 1:2]), obs[:, :1], obs[:, 2:]], axis=1)
-
-
-def obs_postproc(obs, pred):
-  return obs + pred
-
-
-def targ_proc(obs, next_obs):
-  return next_obs - obs
 
 
 def make_environment():
   """Creates an OpenAI Gym environment."""
   # Load the gym environment.
   environment = CartPoleEnv()
-  environment = TimeLimit(environment, 200)
+  environment = TimeLimit(environment, config.TASK_HORIZON)
   environment.seed(SEED)
   environment = wrappers.GymWrapper(environment)
   environment = wrappers.SinglePrecisionWrapper(environment)
@@ -47,9 +31,12 @@ def main(unused_argv):
   del unused_argv
   environment = make_environment()
   environment_spec = specs.make_environment_spec(environment)
-  agent = builder.make_agent(environment_spec, lambda x, a, goal: -reward_fns.cartpole(a, x),
-                             lambda x, a, goal: termination_fns.cartpole(a, x), obs_preproc,
-                             obs_postproc, targ_proc,
+  agent = builder.make_agent(environment_spec,
+                             config.cost_fn,
+                             config.termination_fn,
+                             config.obs_preproc,
+                             config.obs_postproc,
+                             config.targ_proc,
                              hidden_sizes=(200, 200, 200),
                              population_size=500,
                              activation=jax.nn.silu,
