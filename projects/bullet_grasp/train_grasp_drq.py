@@ -9,11 +9,11 @@ from acme.wrappers import gym_wrapper
 import numpy as np
 
 from magi.agents import drq
-from magi.agents.drq import networks
 from magi.agents.drq.agent import DrQConfig
+from magi.agents.drq import networks
 from magi.experimental.environments import bullet_kuka_env
 from magi.utils import loggers
-from magi.research.bullet_grasp import utils
+import utils
 
 FLAGS = flags.FLAGS
 flags.DEFINE_bool('wandb', False, 'whether to log result to wandb')

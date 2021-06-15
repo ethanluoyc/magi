@@ -14,8 +14,8 @@ import numpy as np
 
 from magi.agents.sac.agent import SACAgent
 from magi.experimental.environments import bullet_kuka_env
-from magi.research.bullet_grasp import utils
 from magi.utils import loggers
+import utils
 
 FLAGS = flags.FLAGS
 flags.DEFINE_bool('wandb', False, 'whether to log result to wandb')
