@@ -6,8 +6,6 @@ authors = ["Yicheng Luo <ethanluoyc@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = ">=3.7,<3.10"
-jax = "^0.2.11"
-jaxlib = "^0.1.64"
 dm-acme = "^0.2.1"
 dm-haiku = "^0.0.4"
 optax = "^0.0.8"
@@ -23,6 +21,9 @@ dm_control = { version = "*", optional = true }
 pybullet = { version = "*", optional = true }
 dm-sonnet = "^2.0.0"
 
+jax = { version = "^0.2.11", optional = true }
+jaxlib = { version = "^0.1.64", optional = true }
+
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.4"
 pytest-xdist = "^2.3.0"
@@ -35,6 +36,7 @@ pre-commit = "^2.13.0"
 
 [tool.poetry.extras]
 envs = ["bsuite", "dm-control", "gym", "pybullet"]
+jax = ["jax", "jaxlib"]
 
 [tool.isort]
 profile = "google"
