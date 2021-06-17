@@ -30,4 +30,4 @@ lint:
 install:
 	pip install -U pip setuptools wheel
 	pip install -U --upgrade-strategy eager -f https://storage.googleapis.com/jax-releases/jax_releases.html -e .
-	pip install -U --upgrade-strategy eager -e '.[envs,dev]'
+	pip install -U --upgrade-strategy eager -e '.[envs]'
