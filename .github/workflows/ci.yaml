@@ -28,11 +28,11 @@ jobs:
       id: cache
       with:
         path: ~/.virtualenvs
-        key: poetry-${{ hashFiles('**/poetry.lock') }}
+        key: poetry-${{ hashFiles('**/pyproject.toml') }}
         restore-keys: |
-          poetry-${{ hashFiles('**/poetry.lock') }}
+          poetry-${{ hashFiles('**/pyproject.toml') }}
     - name: Install Dependencies
-      run: poetry install
+      run: poetry install -E envs
       if: steps.cache.outputs.cache-hit != 'true'
     - name: Run tests
       run: poetry run make test
