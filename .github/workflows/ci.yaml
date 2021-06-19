@@ -30,6 +30,9 @@ jobs:
     - name: Check types with pytype
       run: |
         make typecheck
+    - name: Style check
+      run: |
+        black --check magi
     - name: Test with pytest
       run: |
         make test

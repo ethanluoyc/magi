@@ -24,6 +24,7 @@ clean:
 
 .PHONY: lint
 lint:
+	flake8 $(SRC)
 	pylint $(SRC)
 
 .PHONY: install
