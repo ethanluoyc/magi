@@ -9,6 +9,3 @@ flake8==3.9.2
 # flake8-import-order==0.18.1
 pytype==2021.05.14
 pre-commit==2.12.1
-# Documentation
-sphinx
-recommonmark # Markdown support for documentation

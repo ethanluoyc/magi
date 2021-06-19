@@ -2,13 +2,16 @@
 
 **[Installation](#installation)** |
 **[Agents](./magi/agents)** |
-**[Contributing](./CONTRIBUTING.md)**
+**[Contributing](./CONTRIBUTING.md)** |
+**[Documentation](./docs)**
 <!-- **[Examples]** -->
 
 [![pytest](https://github.com/ethanluoyc/magi/actions/workflows/ci.yaml/badge.svg?branch=develop)](https://github.com/ethanluoyc/magi/actions/workflows/ci.yaml)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 Magi is a RL library developed on top of [Acme](https://github.com/deepmind/acme).
+
+_Note_: Magi is in alpha development so expect breaking changes!
 
 ## Installation
 1. Create a new Python virtual environment
@@ -37,3 +40,8 @@ pytest -n `grep -c ^processor /proc/cpuinfo` magi
 
 ## Contributing
 Refer to [CONTRIBUTING.md](./CONTRIBUTING.md)
+
+## Acknowledgements
+Magi is inspired by many of the open-source RL projects out there. Since we
+have a very small number of developers, we take advantage of bits and pieces of
+good implementation from other repositories.

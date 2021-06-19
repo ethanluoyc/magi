@@ -28,7 +28,7 @@ improving the documentation are really appreciated.
 Be sure to first discuss the proposed change that you
 would like to make with a GitHub issues.
 All contributions should be made via Pull Requests (PRs) and will be reviewed before
-being merged.
+being merged. We will try to review the PRs as fast as we can.
 
 To develop locally, first install the additional list of development dependencies by running:
 ```

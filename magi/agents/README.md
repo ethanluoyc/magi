@@ -34,6 +34,8 @@ Agent                                                          | Paper          
 -------------------------------------------------------------- | ----------------------:  | ---:
 <!-- Probabilistic Ensembles with Trajectory Sampling (PETS)        | [Chua et al., 2018]      | [pets](./pets)  -->
 
+## TODOs
+If possible, we can make some of the agents we have here upstream as part of Acme.
 
 <!-- References -->
 [Haarnoja et al., 2018]: https://arxiv.org/abs/1801.01290
