@@ -2,6 +2,7 @@
 
 **[Installation](#installation)** |
 **[Agents](./magi/agents)** |
+**[Examples](./magi/examples)** |
 **[Contributing](./CONTRIBUTING.md)** |
 **[Documentation](./docs)**
 <!-- **[Examples]** -->
@@ -45,3 +46,6 @@ Refer to [CONTRIBUTING.md](./CONTRIBUTING.md)
 Magi is inspired by many of the open-source RL projects out there. Since we
 have a very small number of developers, we take advantage of bits and pieces of
 good implementation from other repositories.
+
+## License
+TODO: open-source timeline not yet decided.
