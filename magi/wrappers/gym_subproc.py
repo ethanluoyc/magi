@@ -1,6 +1,8 @@
 """Wrapper for launching environment in a subprocess.
 Code adapted from https://github.com/openai/gym3/blob/master/gym3/subproc.py
 """
+# MIT License
+# Copyright (c) 2020 OpenAI
 import contextlib
 import multiprocessing as mp
 import os
