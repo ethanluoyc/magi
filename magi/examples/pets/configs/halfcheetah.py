@@ -70,6 +70,6 @@ class HalfCheetahConfig(Config):
         return 0.1 * (acs ** 2).sum(axis=1)
 
     @staticmethod
-    def cost_fn(obs, acs, goal):
+    def reward_fn(obs, acs, goal):
         del goal
-        return HalfCheetahConfig.obs_cost_fn(obs) + HalfCheetahConfig.ac_cost_fn(acs)
+        return -(HalfCheetahConfig.obs_cost_fn(obs) + HalfCheetahConfig.ac_cost_fn(acs))

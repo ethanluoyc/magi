@@ -48,5 +48,5 @@ class PusherConfig(Config):
         return 0.1 * np.sum(np.square(acs), axis=1)
 
     @staticmethod
-    def cost_fn(obs, acs, goal):
-        return PusherConfig.obs_cost_fn(obs, goal) + PusherConfig.ac_cost_fn(acs)
+    def reward_fn(obs, acs, goal):
+        return -(PusherConfig.obs_cost_fn(obs, goal) + PusherConfig.ac_cost_fn(acs))

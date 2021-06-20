@@ -11,6 +11,8 @@ import tree
 
 @chex.dataclass
 class Normalizer:
+    """Statistics for normalizing the observations."""
+
     mean: jnp.ndarray
     std: jnp.ndarray
 
@@ -24,7 +26,10 @@ class Normalizer:
 
 
 def gaussian_nll(pred_mean, pred_logvar, target) -> jnp.ndarray:
-    """Negative Gaussian log-likelihood."""
+    """Negative Gaussian log-likelihood.
+    We are not using the normalized log pdf of normals here
+    to be consistent with mbrl-lib.
+    """
     inv_var = jnp.exp(-pred_logvar)
     assert pred_mean.shape == target.shape == pred_logvar.shape
     mse_loss = jnp.square(pred_mean - target)
@@ -51,39 +56,45 @@ class EnsembleModel:
         self._process_target = process_target
         self._num_ensembles = num_ensembles
 
-        def loss(params: hk.Params, normalizer: Normalizer, x, a, xnext) -> jnp.ndarray:
+        def loss(
+            params: hk.Params, normalizer: Normalizer, obs, action, next_obs
+        ) -> jnp.ndarray:
             """Compute the loss of the network, including L2."""
-            proc_x = preprocess_obs(x)
-            inputs = jnp.concatenate([proc_x, a], axis=-1)
+            proc_x = preprocess_obs(obs)
+            inputs = jnp.concatenate([proc_x, action], axis=-1)
             inputs = normalizer(inputs)
             mean, logvar = self._network.apply(params, inputs)
-            target = process_target(x, xnext)
+            target = process_target(obs, next_obs)
             return gaussian_nll(mean, logvar, target)
 
         def batched_loss(
-            ensem_params: hk.Params, state: ModelState, x, a, xnext
+            ensem_params: hk.Params, state: ModelState, obs, action, next_obs
         ) -> jnp.ndarray:
             """Compute the loss of the network, including L2."""
             nll_loss = jax.vmap(loss, (0, None, 0, 0, 0))(
-                ensem_params, state.normalizer, x, a, xnext
+                ensem_params, state.normalizer, obs, action, next_obs
             )
             # This is consistent with mbrl-lib,
             # which averages over the batch and event dims and sum over the ensembles
             return nll_loss.mean(axis=(1, 2)).sum()
 
-        def evaluate(params, normalizer, x, a, xnext) -> jnp.ndarray:
+        def evaluate(
+            params: hk.Params, normalizer: Normalizer, obs, action, next_obs
+        ) -> jnp.ndarray:
             """Compute the validation loss of a single network, MSE."""
             # Validation is MSE
-            proc_x = preprocess_obs(x)
-            inputs = jnp.concatenate([proc_x, a], axis=-1)
+            proc_x = preprocess_obs(obs)
+            inputs = jnp.concatenate([proc_x, action], axis=-1)
             inputs = normalizer(inputs)
             mean, _ = self._network.apply(params, inputs)
             # dist = tfd.Independent(tfd.Normal(loc=mean, scale=std), 1)
-            target = process_target(x, xnext)
+            target = process_target(obs, next_obs)
             mse_loss = jnp.mean(jnp.square(target - mean).mean(axis=-1), axis=-1)
             return mse_loss
 
-        def batched_eval(ensem_params: hk.Params, state: ModelState, x, a, xnext):
+        def batched_eval(
+            ensem_params: hk.Params, state: ModelState, obs, action, next_obs
+        ):
             """Compute the validation loss for the ensembles, MSE
             Args:
               params: ensemble parameters of shape [E, ...]
@@ -93,7 +104,7 @@ class EnsembleModel:
               mse_loss: mean squared error of shape [E] from the ensembles
             """
             losses = jax.vmap(evaluate, (0, None, None, None, None))(
-                ensem_params, state.normalizer, x, a, xnext
+                ensem_params, state.normalizer, obs, action, next_obs
             )
             # Return the validation MSE per ensemble
             return losses
@@ -102,10 +113,11 @@ class EnsembleModel:
         self._eval_fn = batched_eval
 
     @property
-    def num_ensembles(self):
+    def num_ensembles(self) -> int:
         return self._num_ensembles
 
     def init(self, rng, observation, action) -> Tuple[hk.Params, ModelState]:
+        """Initialize the model parameters and state."""
         inputs = jnp.concatenate([self._preprocess_obs(observation), action], axis=-1)
         params_list = []
         rngs = jax.random.split(rng, self._num_ensembles)
@@ -129,18 +141,15 @@ class EnsembleModel:
         del xnext
         new_input = jnp.concatenate([self._preprocess_obs(x), a], axis=-1)
         new_input = onp.asarray(new_input)
+        # Note the computation is performed with numpy instead of jax.
+        # The reason is because we want to compute the stddev with higher
+        # precision. Using the approach here allows us to avoid having
+        # to enable float64 support in jax.
         new_mean = onp.mean(new_input, axis=0)
         new_std = onp.std(new_input, axis=0, dtype=onp.float64)
-        # We are using a larger eps here for handling observation dims
-        # that do not change during training. The original implementation uses
-        # 1e-12, which is okay only if the inputs are float64, but is too small
-        # for float32 which JAX uses by default.
-        #
         # Without this, environments such as reacher or pusher will not work as
-        # the observation includes positions of goal which do not change.
-        # This needs to be investigated further. In particular, simply changing the eps
-        # here does not seem to fix problems.
-        # affect how we normalize. While the original impl simply does
+        # the observation includes positions of goal which do not change. In this
+        # case, we will not normalize these dimensions.
         # (o - mean) / std. In the case of small std, the normalized inputs will explode.
         new_std[new_std < 1e-12] = 1.0
         new_mean = jnp.array(new_mean.astype(onp.float32))
@@ -148,7 +157,7 @@ class EnsembleModel:
         return state._replace(normalizer=Normalizer(mean=new_mean, std=new_std))
 
     def propagate(
-        self, ensem_params: hk.Params, state: ModelState, key, observations, actions
+        self, ensem_params: hk.Params, state: ModelState, rng, observations, actions
     ):
         """Propagate the samples through the ensembles.
         Given a batch B of observations and actions, reshape the batch into
@@ -179,7 +188,7 @@ class EnsembleModel:
             lambda x: x.reshape((batch_size, mean.shape[-1])), (mean, std)
         )
         # Shuffle back
-        predictions = jax.random.normal(key, shape=mean.shape) * std + mean
+        predictions = jax.random.normal(rng, shape=mean.shape) * std + mean
         return self._postprocess_obs(observations, predictions)
 
     @functools.partial(jax.jit, static_argnums=(0,))
@@ -206,26 +215,30 @@ class EnsembleModel:
 
 
 class ModelEnv:
+    """Simulated environment using a learned ensemble model."""
+
     def __init__(
         self,
         model: EnsembleModel,
-        cost_fn: Callable,
+        reward_fn: Callable,
         terminal_fn: Callable,
         shuffle: bool = True,
     ):
         self._model = model
         self._shuffle = shuffle
-        self._cost_fn = cost_fn
+        self._reward_fn = reward_fn
         self._terminal_fn = terminal_fn
 
-    def reset(self, ensem_params: hk.Params, state: ModelState, key, observations):
+    def reset(self, ensem_params: hk.Params, state: ModelState, rng, observations):
+        """Reset ModelEnv by re-sampling propagation indices."""
         num_ensembles = tree.flatten(ensem_params)[0].shape[0]
+        assert num_ensembles == self._model.num_ensembles
         batch_size = observations.shape[0]
-        if batch_size % num_ensembles:
-            raise NotImplementedError("Ragged batch not supported.")
+        if batch_size % self._model.num_ensembles:
+            raise ValueError("Ragged batch not supported.")
         indices = jnp.arange(batch_size)
         if self._shuffle:
-            indices = jax.random.permutation(key, indices)
+            indices = jax.random.permutation(rng, indices)
         return (state, indices)
 
     def step(
@@ -233,12 +246,12 @@ class ModelEnv:
         ensem_params: hk.Params,
         state: ModelState,
         shuffle_indices,
-        key,
+        rng,
         observations,
         actions,
         goal,
     ):
-        # TODO(yl): Add sampling propagation indices instead of being fully deterministic
+        """Perform a single environment step."""
         assert observations.ndim == 2
         assert actions.ndim == 2
 
@@ -247,7 +260,7 @@ class ModelEnv:
         shuffled_actions = actions[shuffle_indices]
 
         shuffled_output = self._model.propagate(
-            ensem_params, state, key, shuffled_observations, shuffled_actions
+            ensem_params, state, rng, shuffled_observations, shuffled_actions
         )
         # Shuffle back
         next_obs = jax.ops.index_update(
@@ -255,7 +268,7 @@ class ModelEnv:
         )
         return (
             next_obs,
-            self._cost_fn(next_obs, actions, goal),
+            self._reward_fn(next_obs, actions, goal),
             self._terminal_fn(next_obs, actions, goal),
         )
 
@@ -264,33 +277,38 @@ class ModelEnv:
         params: hk.Params,
         state: ModelState,
         rng: jnp.ndarray,
-        initial_state: jnp.ndarray,
+        initial_obs: jnp.ndarray,
         action_sequences: jnp.ndarray,
         goal: Any,
         num_particles: int,
     ):
         """Unroll model along a sequence of actions.
         Args:
-          ensem_params: hk.Params.
-          rng: JAX random key.
-          x_init [B, D]
-          actions [B, T, A]
+            params: hk.Params.
+            state: ModelState. state for the NN model (e.g. normalizer)
+            rng: JAX random key.
+            initial_obs: initial observation to unroll along the action sequence.
+            action_sequences: action sequence to unroll.
+            goal: goal of the task. This is used in computing rewards. Maybe None.
+            num_particles: number of particles used for each action sequence.
+        Returns:
+            total_rewards: the total rewards averaged by the `num_particles`.
         """
         population_size = action_sequences.shape[0]
         initial_obs_batch = jnp.tile(
-            initial_state, (num_particles * population_size, 1)
+            initial_obs, (num_particles * population_size, 1)
         ).astype(jnp.float32)
         rng, rng_reset = jax.random.split(rng)
         state, propagation_id = self.reset(params, state, rng_reset, initial_obs_batch)
         batch_size = initial_obs_batch.shape[0]
-        total_costs = jnp.zeros((batch_size))
-        terminated = jnp.zeros((batch_size), dtype=jnp.bool_)
+        total_rewards = jnp.zeros(batch_size)
+        terminated = jnp.zeros(batch_size, dtype=jnp.bool_)
         obs = initial_obs_batch
 
         actions = jnp.swapaxes(action_sequences, 0, 1)  # Reshape to [T, B, A]
 
         def step(inputs, actions_for_step):
-            rng, obs, state, terminated, total_costs = inputs
+            rng, obs, state, terminated, total_rewards = inputs
             rng, rng_step = jax.random.split(rng)
             action_batch = jnp.repeat(actions_for_step, num_particles, axis=0)
             obs, costs, dones = self.step(
@@ -298,12 +316,12 @@ class ModelEnv:
             )
             costs = jnp.where(terminated, 0, costs)
             terminated = dones | terminated
-            total_costs = total_costs + costs
-            return (rng, obs, state, terminated, total_costs), None
+            total_rewards = total_rewards + costs
+            return (rng, obs, state, terminated, total_rewards), None
 
         output, _ = jax.lax.scan(
-            step, (rng, obs, state, terminated, total_costs), actions
+            step, (rng, obs, state, terminated, total_rewards), actions
         )
-        total_costs = output[-1]
-        total_costs = total_costs.reshape(-1, num_particles)
-        return total_costs.mean(axis=1)
+        total_rewards = output[-1]
+        total_rewards = total_rewards.reshape(-1, num_particles)
+        return total_rewards.mean(axis=1)

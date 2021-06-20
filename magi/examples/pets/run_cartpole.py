@@ -40,7 +40,7 @@ def main(unused_argv):
     environment_spec = specs.make_environment_spec(environment)
     agent = builder.make_agent(
         environment_spec,
-        config.cost_fn,
+        config.reward_fn,
         config.termination_fn,
         config.obs_preproc,
         config.obs_postproc,

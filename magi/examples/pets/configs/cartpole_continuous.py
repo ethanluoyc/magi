@@ -42,9 +42,9 @@ class CartPoleContinuousConfig:
         return next_obs - obs
 
     @staticmethod
-    def cost_fn(x, a, goal):
+    def reward_fn(x, a, goal):
         del goal
-        return -reward_fns.cartpole(a, x)
+        return reward_fns.cartpole(a, x)
 
     @staticmethod
     def termination_fn(x, a, goal):

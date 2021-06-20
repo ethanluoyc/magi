@@ -59,9 +59,9 @@ class CartPoleConfig(Config):
         return 0.01 * jnp.sum(jnp.square(acs), axis=1)
 
     @staticmethod
-    def cost_fn(obs, acs, goal):
+    def reward_fn(obs, acs, goal):
         del goal
-        return CartPoleConfig.obs_cost_fn(obs) + CartPoleConfig.ac_cost_fn(acs)
+        return -(CartPoleConfig.obs_cost_fn(obs) + CartPoleConfig.ac_cost_fn(acs))
 
     @staticmethod
     def _get_ee_pos(obs):

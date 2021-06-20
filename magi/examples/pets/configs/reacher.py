@@ -35,8 +35,8 @@ class ReacherConfig(Config):
         return 0.01 * np.sum(np.square(acs), axis=1)
 
     @staticmethod
-    def cost_fn(obs, act, goal):
-        return ReacherConfig.obs_cost_fn(obs, goal) + ReacherConfig.ac_cost_fn(act)
+    def reward_fn(obs, act, goal):
+        return -(ReacherConfig.obs_cost_fn(obs, goal) + ReacherConfig.ac_cost_fn(act))
 
     @staticmethod
     def get_ee_pos(states):

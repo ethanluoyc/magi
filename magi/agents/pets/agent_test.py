@@ -33,9 +33,9 @@ def terminal_fn(obs, act, goal):
     return jnp.zeros(obs.shape[0], dtype=jnp.bool_)
 
 
-def cost_fn(obs, acs, goal):
+def reward_fn(obs, acs, goal):
     del goal
-    return obs_cost_fn(obs) + ac_cost_fn(acs)
+    return -(obs_cost_fn(obs) + ac_cost_fn(acs))
 
 
 def make_environment():
@@ -60,7 +60,7 @@ class PetsTest(parameterized.TestCase):
         spec = specs.make_environment_spec(environment)
         agent = builder.make_agent(
             spec,
-            cost_fn,
+            reward_fn,
             terminal_fn,
             obs_preproc,
             obs_postproc,

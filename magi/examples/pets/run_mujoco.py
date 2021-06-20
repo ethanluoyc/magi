@@ -3,11 +3,13 @@
 """Example running PETS on continuous control environments."""
 
 import time
+from typing import Tuple
 
 from absl import app
 from absl import flags
 from acme import specs
 from acme import wrappers
+import dm_env
 from gym import wrappers as gym_wrappers
 import jax
 import numpy as np
@@ -17,10 +19,7 @@ from magi.environments.pets_cartpole import CartpoleEnv
 from magi.environments.pets_halfcheetah import HalfCheetahEnv
 from magi.environments.pets_pusher import PusherEnv
 from magi.environments.pets_reacher import Reacher3DEnv
-from magi.examples.pets.configs.cartpole import CartPoleConfig
-from magi.examples.pets.configs.halfcheetah import HalfCheetahConfig
-from magi.examples.pets.configs.pusher import PusherConfig
-from magi.examples.pets.configs.reacher import ReacherConfig
+from magi.examples.pets import configs
 from magi.utils import loggers
 
 FLAGS = flags.FLAGS
@@ -32,14 +31,14 @@ flags.DEFINE_integer("num_episodes", int(100), "Number of episodes.")
 flags.DEFINE_integer("seed", 0, "Random seed.")
 
 ENV_CONFIG_MAP = {
-    "reacher": (Reacher3DEnv, ReacherConfig),
-    "pusher": (PusherEnv, PusherConfig),
-    "halfcheetah": (HalfCheetahEnv, HalfCheetahConfig),
-    "cartpole": (CartpoleEnv, CartPoleConfig),
+    "reacher": (Reacher3DEnv, configs.ReacherConfig),
+    "pusher": (PusherEnv, configs.PusherConfig),
+    "halfcheetah": (HalfCheetahEnv, configs.HalfCheetahConfig),
+    "cartpole": (CartpoleEnv, configs.CartPoleConfig),
 }
 
 
-def make_environment(name, seed):
+def make_environment(name, seed) -> Tuple[dm_env.Environment, configs.Config]:
     """Creates an OpenAI Gym environment."""
     # Load the gym environment.
     try:
@@ -75,7 +74,7 @@ def main(unused_argv):
     print("action_spec", environment_spec.actions.shape)
     agent = builder.make_agent(
         environment_spec,
-        config.cost_fn,
+        config.reward_fn,
         config.termination_fn,
         config.obs_preproc,
         config.obs_postproc,

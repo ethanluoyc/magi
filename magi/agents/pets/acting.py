@@ -27,8 +27,8 @@ def _make_trajectory_cost_fn(model, num_particles: int):
           x_init: [D]
           params, key, num_particles
         """
-        costs = model.unroll(params, state, key, x_init, actions, goal, num_particles)
-        return costs
+        rewards = model.unroll(params, state, key, x_init, actions, goal, num_particles)
+        return -rewards
 
     return cost
 
