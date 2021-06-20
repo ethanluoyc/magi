@@ -3,7 +3,7 @@
 
 from absl import app
 from absl import flags
-from acme import environment_loop
+import acme
 from acme import specs
 from acme import wrappers
 from acme.utils import loggers
@@ -13,8 +13,7 @@ import numpy as np
 
 from magi.agents.pets import builder
 from magi.environments.cartpole_continuous import CartPoleEnv
-
-from . import configs
+from magi.examples.pets import configs
 
 FLAGS = flags.FLAGS
 flags.DEFINE_integer("num_episodes", int(100), "Number of episodes.")
@@ -64,9 +63,7 @@ def main(unused_argv):
     )
 
     env_loop_logger = loggers.TerminalLogger(label="environment_loop")
-    env_loop = environment_loop.EnvironmentLoop(
-        environment, agent, logger=env_loop_logger
-    )
+    env_loop = acme.EnvironmentLoop(environment, agent, logger=env_loop_logger)
     env_loop.run(num_episodes=FLAGS.num_episodes)
 
 

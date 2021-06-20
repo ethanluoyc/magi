@@ -68,6 +68,10 @@ class PetsTest(parameterized.TestCase):
             optimizer=optimizer,
             hidden_sizes=[10],
             population_size=100,
+            num_ensembles=2,
+            planning_horizon=2,
+            cem_iterations=1,
+            num_particles=1,
         )
         env_loop = acme.EnvironmentLoop(environment, agent)
         env_loop.run(num_episodes=2)

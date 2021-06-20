@@ -86,12 +86,12 @@ class OptimizerBasedActor(core.Actor):
             return action
         variables = self._client.params
         params = variables["params"]
-        normalizer = variables["state"]
+        state = variables["state"]
         key = next(self._rng)
         actions, extras = self._controller_fn(
             self._cost_fn,
             params,
-            normalizer,
+            state,
             observation,
             self._last_actions,
             key,

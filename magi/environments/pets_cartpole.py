@@ -8,7 +8,6 @@ import os
 
 from gym import utils
 from gym.envs.mujoco import mujoco_env
-import jax.numpy as jnp
 import numpy as np
 
 

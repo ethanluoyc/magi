@@ -19,7 +19,7 @@ from magi.agents.pets import replay as replay_lib
 class TraningState(NamedTuple):
     params: hk.Params
     opt_state: optax.OptState
-    normalizer: models.Normalizer
+    state: models.ModelState
 
 
 class ModelBasedLearner(core.Learner):
@@ -55,33 +55,33 @@ class ModelBasedLearner(core.Learner):
         def init():
             obs = utils.add_batch_dim(utils.zeros_like(spec.observations))
             act = utils.add_batch_dim(utils.zeros_like(spec.actions))
-            params, normalizer = model.init(init_key, obs, act)
-            return TraningState(params, self.opt.init(params), normalizer)
+            params, state = model.init(init_key, obs, act)
+            return TraningState(params, self.opt.init(params), state)
 
         @jax.jit
         def update(state: TraningState, x, a, xnext):
             """Learning rule (stochastic gradient descent)."""
             value, grads = jax.value_and_grad(model.loss)(
-                state.params, state.normalizer, x, a, xnext
+                state.params, state.state, x, a, xnext
             )
             updates, new_opt_state = self.opt.update(
                 grads, state.opt_state, state.params
             )
             new_params = optax.apply_updates(state.params, updates)
-            return TraningState(new_params, new_opt_state, state.normalizer), value
+            return TraningState(new_params, new_opt_state, state.state), value
 
         self._update = update
 
         self._state = init()
 
-    def _evaluate(self, params, normalizer, iterator):
+    def _evaluate(self, params: hk.Params, state: models.ModelState, iterator):
         if isinstance(iterator, replay_lib.BootstrapIterator):
             iterator.toggle_bootstrap()
 
         losses = []
         for batch in iterator:
             batch_loss = self._model.evaluate(
-                params, normalizer, batch.obs, batch.act, batch.next_obs
+                params, state, batch.obs, batch.act, batch.next_obs
             )
             losses.append(batch_loss)
         if isinstance(iterator, replay_lib.BootstrapIterator):
@@ -90,14 +90,14 @@ class ModelBasedLearner(core.Learner):
         # Mean along batch dimension
         return jnp.stack(losses).mean(axis=0)
 
-    def _train(self, replay):
+    def _train(self, replay: replay_lib.ReplayBuffer):
         transitions = replay.get_all()
-        new_normalizer = self._model.update_normalizer(
-            transitions.obs, transitions.act, transitions.next_obs
+        new_state = self._model.update_normalizer(
+            self._state.state, transitions.obs, transitions.act, transitions.next_obs
         )
-        self._state = self._state._replace(normalizer=new_normalizer)
-        logging.info("Normalizer mean %s", self._state.normalizer.mean)
-        logging.info("Normalizer std %s", self._state.normalizer.std)
+        self._state = self._state._replace(state=new_state)
+        logging.info("Normalizer mean %s", self._state.state.normalizer.mean)
+        logging.info("Normalizer std %s", self._state.state.normalizer.std)
         train_iterator, val_iterator = replay.get_iterators(
             self.batch_size,
             val_ratio=self._val_ratio,
@@ -113,7 +113,7 @@ class ModelBasedLearner(core.Learner):
         epochs_since_update = 0
         best_params: Optional[hk.Params] = None
         best_val_score = self._evaluate(
-            self._state.params, self._state.normalizer, val_iterator
+            self._state.params, self._state.state, val_iterator
         )
         for epoch in range(self.num_epochs):
             batch_losses: List[float] = []
@@ -126,7 +126,7 @@ class ModelBasedLearner(core.Learner):
             training_losses.append(total_avg_loss)
 
             eval_score = self._evaluate(
-                self._state.params, self._state.normalizer, val_iterator
+                self._state.params, self._state.state, val_iterator
             )
             val_scores.append(eval_score.mean().item())
 
@@ -179,4 +179,4 @@ class ModelBasedLearner(core.Learner):
 
     def get_variables(self, names: List[str]) -> List[hk.Params]:
         del names
-        return [{"params": self._state.params, "state": self._state.normalizer}]
+        return [{"params": self._state.params, "state": self._state.state}]

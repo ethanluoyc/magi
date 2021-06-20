@@ -4,7 +4,7 @@ from typing import Callable, Sequence
 import jax
 import jax.numpy as jnp
 
-from magi.agents.pets.configs.default import Config
+from magi.examples.pets.configs.default import Config
 
 
 @dataclasses.dataclass

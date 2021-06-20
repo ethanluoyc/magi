@@ -1,21 +1,27 @@
 #!/usr/bin/env python
 # coding: utf-8
+"""Example running PETS on continuous control environments."""
+
+import time
 
 from absl import app
 from absl import flags
 from acme import specs
 from acme import wrappers
-from acme.utils import loggers
 from gym import wrappers as gym_wrappers
 import jax
 import numpy as np
 
 from magi.agents.pets import builder
-from magi.agents.pets import configs
-from magi.environments.cartpole import CartpoleEnv
-from magi.environments.pets_cheetah import HalfCheetahEnv
-from magi.environments.pusher import PusherEnv
-from magi.environments.reacher import Reacher3DEnv
+from magi.environments.pets_cartpole import CartpoleEnv
+from magi.environments.pets_halfcheetah import HalfCheetahEnv
+from magi.environments.pets_pusher import PusherEnv
+from magi.environments.pets_reacher import Reacher3DEnv
+from magi.examples.pets.configs.cartpole import CartPoleConfig
+from magi.examples.pets.configs.halfcheetah import HalfCheetahConfig
+from magi.examples.pets.configs.pusher import PusherConfig
+from magi.examples.pets.configs.reacher import ReacherConfig
+from magi.utils import loggers
 
 FLAGS = flags.FLAGS
 flags.DEFINE_bool("wandb", False, "whether to log result to wandb")
@@ -25,48 +31,45 @@ flags.DEFINE_string("env", "halfcheetah", "environment")
 flags.DEFINE_integer("num_episodes", int(100), "Number of episodes.")
 flags.DEFINE_integer("seed", 0, "Random seed.")
 
+ENV_CONFIG_MAP = {
+    "reacher": (Reacher3DEnv, ReacherConfig),
+    "pusher": (PusherEnv, PusherConfig),
+    "halfcheetah": (HalfCheetahEnv, HalfCheetahConfig),
+    "cartpole": (CartpoleEnv, CartPoleConfig),
+}
 
-def make_environment(name, task_horizon, seed):
+
+def make_environment(name, seed):
     """Creates an OpenAI Gym environment."""
     # Load the gym environment.
-    if name == "reacher":
-        environment = Reacher3DEnv()
-    elif name == "pusher":
-        environment = PusherEnv()
-    elif name == "halfcheetah":
-        environment = HalfCheetahEnv()
-    elif name == "cartpole":
-        environment = CartpoleEnv()
+    try:
+        env_cls, cfg_cls = ENV_CONFIG_MAP[name]
+        environment = env_cls()
+        cfg = cfg_cls()
+    except KeyError as e:
+        raise ValueError(f"Unknown environment {name}") from e
     else:
-        raise ValueError("Unknown environment")
-    environment = gym_wrappers.TimeLimit(environment, task_horizon)
-    environment.seed(seed)
-    environment = wrappers.GymWrapper(environment)
-    environment = wrappers.SinglePrecisionWrapper(environment)
-    return environment
-
-
-def get_config(env_name):
-    if env_name == "reacher":
-        return configs.ReacherConfig()
-    elif env_name == "pusher":
-        return configs.PusherConfig()
-    elif env_name == "halfcheetah":
-        return configs.HalfCheetahConfig()
-    elif env_name == "cartpole":
-        return configs.CartPoleConfig()
-    else:
-        raise ValueError("Unknown environment")
+        environment = gym_wrappers.TimeLimit(environment, cfg.task_horizon)
+        environment.seed(seed)
+        environment = wrappers.GymWrapper(environment)
+        environment = wrappers.SinglePrecisionWrapper(environment)
+        return environment, cfg
 
 
 def main(unused_argv):
     del unused_argv
     np.random.seed(FLAGS.seed)
     rng = np.random.default_rng(FLAGS.seed + 1)
-    config = get_config(FLAGS.env)
-    environment = make_environment(
-        FLAGS.env, config.task_horizon, int(rng.integers(0, 2 ** 32))
-    )
+    if FLAGS.wandb:
+        import wandb  # pylint: disable=import-outside-toplevel
+
+        wandb.init(
+            project=FLAGS.wandb_project,
+            entity=FLAGS.wandb_entity,
+            name=f"pets-{FLAGS.env}_{FLAGS.seed}_{int(time.time())}",
+            config=FLAGS,
+        )
+    environment, config = make_environment(FLAGS.env, int(rng.integers(0, 2 ** 32)))
     environment_spec = specs.make_environment_spec(environment)
     print("observation spec", environment_spec.observations.shape)
     print("action_spec", environment_spec.actions.shape)
@@ -95,22 +98,34 @@ def main(unused_argv):
         patience=config.patience,
     )
 
-    logger = loggers.TerminalLogger(label="environment_loop")
+    logger = loggers.make_logger("environment_loop", use_wandb=FLAGS.wandb)
+    total_num_steps = 0
     for episode in range(FLAGS.num_episodes):
         timestep = environment.reset()
         goal = config.get_goal(environment)
         agent.update_goal(goal)
         agent.observe_first(timestep)
         episode_return = 0.0
-        num_steps = 0
+        episode_steps = 0
         while not timestep.last():
             action = agent.select_action(observation=timestep.observation)
             timestep = environment.step(action)
-            num_steps += 1
+            episode_steps += 1
             agent.observe(action, next_timestep=timestep)
             agent.update()
             episode_return += timestep.reward
-        logger.write({"episode": episode, "episode_return": episode_return})
+        total_num_steps += episode_steps
+        logger.write(
+            {
+                "episodes": episode,
+                "episode_return": episode_return,
+                "episode_length": episode_steps,
+                "steps": total_num_steps,
+            }
+        )
+
+    if FLAGS.wandb:
+        wandb.finish()
 
 
 if __name__ == "__main__":

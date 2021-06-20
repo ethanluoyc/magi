@@ -75,12 +75,13 @@ def minimize_cem(
     best_solution = jnp.empty_like(initial_mu)
     state = (0, best_cost, best_solution, initial_mu, initial_var, key, args)
 
-    for _ in range(n_iterations):
-        state = loop(state)
+    # TODO: expose both static and dynamic loops
+    # for _ in range(n_iterations):
+    #     state = loop(state)
 
-    _, new_best_cost, best, mu, _, _, _ = state
+    # _, new_best_cost, best, mu, _, _, _ = state
     # TODO: expose intermediate results
-    # _, new_best_cost, best, mu, _, _, _ = jax.lax.while_loop(cond_fn, loop, state)
+    _, new_best_cost, best, mu, _, _, _ = jax.lax.while_loop(cond_fn, loop, state)
     return mu if return_mean_elites else best, new_best_cost
 
 

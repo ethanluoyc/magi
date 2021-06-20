@@ -116,9 +116,7 @@ def make_agent(
     )
 
     # Create actor
-    model_env = models.ModelEnv(
-        network, obs_preprocess, obs_postprocess, cost_fn, terminal_fn
-    )
+    model_env = models.ModelEnv(model, cost_fn, terminal_fn)
     variable_client = variable_utils.VariableClient(learner, "")
 
     if optimizer == "cem":
