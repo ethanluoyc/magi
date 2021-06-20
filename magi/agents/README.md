@@ -32,7 +32,7 @@ Data Regulalized Q (DrQ)                                       | [Kostrikov et a
 
 Agent                                                          | Paper                    | Code
 -------------------------------------------------------------- | ----------------------:  | ---:
-<!-- Probabilistic Ensembles with Trajectory Sampling (PETS)        | [Chua et al., 2018]      | [pets](./pets)  -->
+Probabilistic Ensembles with Trajectory Sampling (PETS)        | [Chua et al., 2018]      | [pets](./pets)
 
 ## TODOs
 If possible, we can make some of the agents we have here upstream as part of Acme.

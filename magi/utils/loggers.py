@@ -39,7 +39,7 @@ def make_logger(
     serialize_fn=base.to_numpy,
     steps_key: str = "steps",
     use_wandb=True,
-):
+) -> base.Logger:
     """Make a default Acme logger.
 
     Args:
