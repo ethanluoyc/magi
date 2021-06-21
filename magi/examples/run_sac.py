@@ -1,3 +1,4 @@
+"""Run Soft-Actor Critic on dm_control (state observation)."""
 import time
 
 from absl import app
@@ -37,15 +38,6 @@ def load_env(domain_name, task_name, seed):
 
 def main(_):
     np.random.seed(FLAGS.seed)
-    if FLAGS.wandb:
-        import wandb  # pylint: disable=import-outside-toplevel
-
-        wandb.init(
-            project=FLAGS.wandb_project,
-            entity=FLAGS.wandb_entity,
-            name=f"{FLAGS.domain_name}-{FLAGS.task_name}_{FLAGS.seed}_{int(time.time())}",
-            config=FLAGS,
-        )
     env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed)
     spec = specs.make_environment_spec(env)
 
@@ -62,14 +54,24 @@ def main(_):
 
     policy = hk.without_apply_rng(hk.transform(policy_fn, apply_rng=True))
     critic = hk.without_apply_rng(hk.transform(critic_fn, apply_rng=True))
-
+    exp_name = (
+        f"sac-{FLAGS.domain_name}_{FLAGS.task_name}_{FLAGS.seed}_{int(time.time())}"
+    )
     algo = SACAgent(
         environment_spec=spec,
         policy=policy,
         critic=critic,
         seed=FLAGS.seed,
         logger=loggers.make_logger(
-            label="learner", log_frequency=1000, use_wandb=FLAGS.wandb
+            "agent",
+            use_wandb=FLAGS.wandb,
+            log_frequency=1000,
+            wandb_kwargs={
+                "project": FLAGS.wandb_project,
+                "entity": FLAGS.wandb_entity,
+                "name": exp_name,
+                "config": FLAGS,
+            },
         ),
     )
 
@@ -79,8 +81,6 @@ def main(_):
         logger=loggers.make_logger(label="environment_loop", use_wandb=FLAGS.wandb),
     )
     loop.run(num_steps=FLAGS.num_steps)
-    if FLAGS.wandb:
-        wandb.finish()
 
 
 if __name__ == "__main__":

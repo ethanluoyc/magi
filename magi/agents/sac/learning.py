@@ -175,7 +175,7 @@ class SACLearner(core.Learner, core.VariableSource):
             self._alpha_opt_state,
             entropy=actor_stats["entropy"],
         )
-        self._counter.increment(steps=1)
+        counts = self._counter.increment(steps=1)
         results = {
             "q1": critic_stats["q1"],
             "q2": critic_stats["q2"],
@@ -184,6 +184,7 @@ class SACLearner(core.Learner, core.VariableSource):
             "alpha_loss": loss_alpha,
             "actor_loss": loss_actor,
             "entropy": actor_stats["entropy"],
+            **counts,
         }
         self._logger.write(results)
         # Update target network.

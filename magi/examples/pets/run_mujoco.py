@@ -59,15 +59,15 @@ def main(unused_argv):
     del unused_argv
     np.random.seed(FLAGS.seed)
     rng = np.random.default_rng(FLAGS.seed + 1)
-    if FLAGS.wandb:
-        import wandb  # pylint: disable=import-outside-toplevel
+    # if FLAGS.wandb:
+    #     import wandb  # pylint: disable=import-outside-toplevel
 
-        wandb.init(
-            project=FLAGS.wandb_project,
-            entity=FLAGS.wandb_entity,
-            name=f"pets-{FLAGS.env}_{FLAGS.seed}_{int(time.time())}",
-            config=FLAGS,
-        )
+    #     wandb.init(
+    #         project=FLAGS.wandb_project,
+    #         entity=FLAGS.wandb_entity,
+    #         name=f"pets-{FLAGS.env}_{FLAGS.seed}_{int(time.time())}",
+    #         config=FLAGS,
+    #     )
     environment, config = make_environment(FLAGS.env, int(rng.integers(0, 2 ** 32)))
     environment_spec = specs.make_environment_spec(environment)
     print("observation spec", environment_spec.observations.shape)
@@ -97,7 +97,16 @@ def main(unused_argv):
         patience=config.patience,
     )
 
-    logger = loggers.make_logger("environment_loop", use_wandb=FLAGS.wandb)
+    logger = loggers.make_logger(
+        "environment_loop",
+        use_wandb=FLAGS.wandb,
+        wandb_kwargs={
+            "project": FLAGS.wandb_project,
+            "entity": FLAGS.wandb_entity,
+            "name": f"pets-{FLAGS.env}_{FLAGS.seed}_{int(time.time())}",
+            "config": FLAGS,
+        },
+    )
     total_num_steps = 0
     for episode in range(FLAGS.num_episodes):
         timestep = environment.reset()
@@ -124,6 +133,8 @@ def main(unused_argv):
         )
 
     if FLAGS.wandb:
+        import wandb
+
         wandb.finish()
 
 
