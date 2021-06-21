@@ -33,6 +33,14 @@ then it's likely that there are some issues to setting up your own environment.
 Refer to [.github/workflows/ci.yaml](.github/workflows/ci.yaml) as the official source
 for how to set up the environment.
 
+## Agents
+magi includes popular RL algorithm implementation such as SAC, DrQ, SAC-AE and PETS.
+Refer to [magi/agents](./magi/agents) for a full list of agents.
+
+## Examples
+Check out [magi/examples](./magi/examples) where
+we include examples of using our RL agents on popular benchmark tasks.
+
 ## Testing
 On Linux, you can run tests with
 ```
