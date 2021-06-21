@@ -1,21 +1,61 @@
 """Logging for RL experiments."""
+from typing import Any, Optional
+
+from absl import logging
 from acme.utils.loggers import aggregators
 from acme.utils.loggers import asynchronous as async_logger
 from acme.utils.loggers import base
 from acme.utils.loggers import filters
 from acme.utils.loggers import terminal
-import wandb
+
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 
 class WandbLogger(base.Logger):
     """Logging results to weights and biases"""
 
-    def __init__(self, label=None, log_every_n_steps=1):
+    def __init__(
+        self,
+        label: Optional[str] = None,
+        steps_key: Optional[str] = None,
+        *,
+        project: Optional[str] = None,
+        entity: Optional[str] = None,
+        dir: Optional[str] = None,  # pylint: disable=redefined-builtin
+        name: Optional[str] = None,
+        group: Optional[str] = None,
+        config: Optional[Any] = None,
+        **wandb_kwargs,
+    ):
+        if wandb is None:
+            raise ImportError(
+                "Logger not supported as `wandb` logger is not installed yet,"  # pragma: no-cover
+                " install it with `pip install wandb`."
+            )
         self._label = label
-        self._log_every_n_steps = log_every_n_steps
-        self._run = wandb.run
-        self._step = 0
-        assert self._run is not None
+        self._iter = 0
+        self._steps_key = steps_key
+        if wandb.run is None:
+            self._run = wandb.init(
+                project=project,
+                dir=dir,
+                entity=entity,
+                name=name,
+                group=group,
+                config=config,
+                **wandb_kwargs,
+            )
+        else:
+            self._run = wandb.run
+        # define default x-axis (for latest wandb versions)
+        if steps_key and getattr(self._run, "define_metric", None):
+            prefix = f"{self._label}/*" if self._label else "*"
+            self._run.define_metric(
+                prefix, step_metric=f"{self._label}/{self._steps_key}"
+            )
 
     @property
     def run(self):
@@ -24,11 +64,16 @@ class WandbLogger(base.Logger):
 
     def write(self, data: base.LoggingData):
         data = base.to_numpy(data)
-        if self._step % self._log_every_n_steps == 0:
-            if self._label:
-                stats = {f"{self._label}/{k}": v for k, v in data.items()}
-            self._run.log(stats)
-        self._step += 1
+        if self._steps_key is not None and self._steps_key not in data:
+            logging.warn("steps key %s not found. Skip logging.", self._steps_key)
+            return
+        if self._label:
+            stats = {f"{self._label}/{k}": v for k, v in data.items()}
+        else:
+            stats = data
+        self._run.log(stats)
+
+        self._iter += 1
 
 
 def make_logger(
@@ -39,6 +84,7 @@ def make_logger(
     serialize_fn=base.to_numpy,
     steps_key: str = "steps",
     use_wandb=True,
+    wandb_kwargs=None,
 ) -> base.Logger:
     """Make a default Acme logger.
 
@@ -55,14 +101,15 @@ def make_logger(
     Returns:
       A logger object that responds to logger.write(some_dict).
     """
-    del steps_key
     if not print_fn:
         print_fn = print
     terminal_logger = terminal.TerminalLogger(label=label, print_fn=print_fn)
 
     loggers = [terminal_logger]
     if use_wandb:
-        loggers.append(WandbLogger(label))
+        if wandb_kwargs is None:
+            wandb_kwargs = {}
+        loggers.append(WandbLogger(label=label, steps_key=steps_key, **wandb_kwargs))
 
     # Dispatch to all writers and filter Nones and by time.
     logger = aggregators.Dispatcher(loggers, serialize_fn)
