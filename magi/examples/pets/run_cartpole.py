@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # coding: utf-8
 
+import time
+
 from absl import app
 from absl import flags
 import acme
@@ -18,6 +20,9 @@ from magi.examples.pets import configs
 FLAGS = flags.FLAGS
 flags.DEFINE_integer("num_episodes", int(100), "Number of episodes.")
 flags.DEFINE_integer("seed", 0, "Random seed.")
+flags.DEFINE_bool("wandb", False, "whether to log result to wandb")
+flags.DEFINE_string("wandb_project", "", "wandb project name")
+flags.DEFINE_string("wandb_entity", "", "wandb project entity")
 
 
 def make_environment(seed, task_horizon):
@@ -62,8 +67,17 @@ def main(unused_argv):
         patience=config.patience,
     )
 
-    env_loop_logger = loggers.TerminalLogger(label="environment_loop")
-    env_loop = acme.EnvironmentLoop(environment, agent, logger=env_loop_logger)
+    logger = loggers.make_logger(
+        "environment_loop",
+        use_wandb=FLAGS.wandb,
+        wandb_kwargs={
+            "project": FLAGS.wandb_project,
+            "entity": FLAGS.wandb_entity,
+            "name": f"pets_cartpole_{FLAGS.seed}_{int(time.time())}",
+            "config": FLAGS,
+        },
+    )
+    env_loop = acme.EnvironmentLoop(environment, agent, logger=logger)
     env_loop.run(num_episodes=FLAGS.num_episodes)
 
 

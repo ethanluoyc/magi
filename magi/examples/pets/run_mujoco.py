@@ -59,15 +59,6 @@ def main(unused_argv):
     del unused_argv
     np.random.seed(FLAGS.seed)
     rng = np.random.default_rng(FLAGS.seed + 1)
-    # if FLAGS.wandb:
-    #     import wandb  # pylint: disable=import-outside-toplevel
-
-    #     wandb.init(
-    #         project=FLAGS.wandb_project,
-    #         entity=FLAGS.wandb_entity,
-    #         name=f"pets-{FLAGS.env}_{FLAGS.seed}_{int(time.time())}",
-    #         config=FLAGS,
-    #     )
     environment, config = make_environment(FLAGS.env, int(rng.integers(0, 2 ** 32)))
     environment_spec = specs.make_environment_spec(environment)
     print("observation spec", environment_spec.observations.shape)
