@@ -12,7 +12,7 @@ For the JAX agents, we use
 1. [dm-haiku](https://github.com/deepmind/dm-haiku) for implementing the neural network modules,
 2, [optax](https://github.com/deepmind/optax) for building optimizers,
 3. [rlax](https://github.com/deepmind/rlax/tree/master/rlax) for RL loss functions,
-4. TensorFlow Probability's (TFP) JAX [substrates](https://www.tensorflow.org/probability/api_docs/python/tfp/substrates/jax) and [Distrax](https://github.com/deepmind/distrax) to build
+4. TensorFlow Probability's (TFP) JAX [substrates](https://www.tensorflow.org/probability/api_docs/python/tfp/substrates/jax) to build
 probability distributions primitives,
 5. [dm-reverb](https://github.com/deepmind/reverb) for scalable replay buffer implementation.
 

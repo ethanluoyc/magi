@@ -18,7 +18,12 @@ class SACTest(absltest.TestCase):
         )
         spec = specs.make_environment_spec(environment)
         # Construct the agent.
-        network_spec = networks.make_default_networks(spec)
+        network_spec = networks.make_default_networks(
+            spec,
+            actor_hidden_sizes=(32, 32),
+            critic_hidden_sizes=(32, 32),
+            num_layers=4,
+        )
         agent = SACAEAgent(
             environment_spec=spec,
             networks=network_spec,

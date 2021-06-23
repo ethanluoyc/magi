@@ -8,14 +8,12 @@ dm-sonnet
 trfl
 
 # JAX and the DeepMind JAX eco-system
-# -f https://storage.googleapis.com/jax-releases/jax_releases.html
 jax==0.2.11
-jaxlib==0.1.64+cuda110
+jaxlib==0.1.64
 dm-haiku>=0.0.4
-optax<=0.0.6
+optax>=0.0.8
 rlax @ git+git://github.com/deepmind/rlax.git#egg=rlax
 typing-extensions
-distrax<=0.0.1
 
 # Reverb
 dm-reverb-nightly==0.3.0.dev20210517

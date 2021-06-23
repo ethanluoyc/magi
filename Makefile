@@ -1,13 +1,18 @@
 SRC = magi
+N_CPUS ?= $(shell grep -c ^processor /proc/cpuinfo)
 
 .PHONY: typecheck
 typecheck:
-	pytype $(shell grep -c ^processor /proc/cpuinfo) $(SRC)
+	pytype -j $(N_CPUS) $(SRC)
 
 .PHONY: test
 test:
-	pytest --color=yes -rf --ignore=magi/agents/archived --ignore=magi/experimental \
-	 $(SRC)
+	JAX_PLATFORM_NAME=cpu pytest -n $(N_CPUS) \
+		--color=yes \
+		-rf \
+		--ignore=magi/agents/archived \
+		--ignore=magi/experimental \
+		$(SRC)
 
 .PHONY: isort
 isort:

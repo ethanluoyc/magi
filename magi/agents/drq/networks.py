@@ -1,32 +1,37 @@
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
-import distrax
 import haiku as hk
 import jax
 import jax.numpy as jnp
+import tensorflow_probability.substrates.jax as tfp
+
+tfd = tfp.distributions
+tfb = tfp.bijectors
 
 orthogonal_init = hk.initializers.Orthogonal(scale=jnp.sqrt(2.0))
 
 
 @dataclass
 class GaussianTanhTransformedDistribution:
+    # TODO(yl): test the head module from acme.
     mean: jnp.ndarray
     log_std: jnp.ndarray
 
     def _build_dist(self):
-        base_dist = distrax.MultivariateNormalDiag(
-            loc=self.mean, scale_diag=jnp.exp(self.log_std)
-        )
-        return distrax.Transformed(
-            distribution=base_dist, bijector=distrax.Block(distrax.Tanh(), 1)
+        base_dist = tfd.Normal(loc=self.mean, scale=jnp.exp(self.log_std))
+        return tfd.Independent(
+            tfd.TransformedDistribution(distribution=base_dist, bijector=tfb.Tanh()),
+            reinterpreted_batch_ndims=1,
         )
 
     def sample(self, seed):
         return self._build_dist().sample(seed=seed)
 
     def sample_and_log_prob(self, seed):
-        return self._build_dist().sample_and_log_prob(seed=seed)
+        dist = self._build_dist()
+        sample = dist.sample(seed=seed)
+        return sample, dist.log_prob(sample)
 
     def mode(self):
         return jnp.tanh(self.mean)
