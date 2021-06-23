@@ -71,6 +71,7 @@ def main(_):
             batch_size=FLAGS.batch_size,
             temperature_adam_b1=0.9,
             initial_num_steps=FLAGS.min_num_steps,
+            n_step=5,
         ),
         seed=FLAGS.seed,
         logger=loggers.make_logger(
@@ -97,4 +98,7 @@ def main(_):
 
 
 if __name__ == "__main__":
+    import tensorflow as tf
+
+    tf.config.set_visible_devices([], "GPU")
     app.run(main)

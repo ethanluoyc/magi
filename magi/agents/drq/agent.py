@@ -4,10 +4,10 @@ import time
 from typing import Any, Mapping, NamedTuple, Optional
 
 from acme import core
-from acme import datasets
 from acme import specs
 from acme import types
 from acme.adders import reverb as adders
+from acme.agents import replay
 from acme.jax import utils
 from acme.jax import variable_utils
 from acme.utils import counting
@@ -20,7 +20,6 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import reverb
-from reverb import rate_limiters
 from reverb.replay_sample import ReplaySample
 
 from magi.agents import actors
@@ -28,6 +27,13 @@ from magi.agents.drq.augmentations import batched_random_crop
 from magi.agents.sac import acting
 
 batched_random_crop = jax.jit(batched_random_crop)
+
+
+class ReverbUpdate(NamedTuple):
+    """Tuple for updating reverb priority information."""
+
+    keys: jnp.ndarray
+    priorities: jnp.ndarray
 
 
 def soft_update(
@@ -44,7 +50,9 @@ def soft_update(
 
 
 # Loss functions
-def make_critic_loss_fn(encoder_apply, actor_apply, critic_apply, gamma):
+def make_critic_loss_fn(
+    encoder_apply, actor_apply, critic_apply, gamma, importance_sampling_exponent
+):
     def _loss_critic(
         params_critic: hk.Params,
         key: jnp.ndarray,
@@ -54,6 +62,7 @@ def make_critic_loss_fn(encoder_apply, actor_apply, critic_apply, gamma):
         batch: reverb.ReplaySample,
     ):
         data: types.Transition = batch.data
+        keys, probs = batch.info.key, batch.info.probability
         next_encoded = jax.lax.stop_gradient(
             encoder_apply(params_critic["encoder"], data.next_observation)
         )
@@ -77,11 +86,19 @@ def make_critic_loss_fn(encoder_apply, actor_apply, critic_apply, gamma):
         chex.assert_rank(
             (next_log_probs, target_q, next_q1, next_q2, q1, q2), [1, 1, 1, 1, 1, 1]
         )
-        # abs_td = jnp.abs(target_q - q1)
-        loss_critic = (jnp.square(target_q - q1) + jnp.square(target_q - q2)).mean(
-            axis=0
-        )
-        return loss_critic, {"q1": q1.mean(), "q2": q2.mean()}
+        abs_td = (jnp.abs(target_q - q1) + jnp.abs(target_q - q2)) * 0.5
+
+        # Importance weighting.
+        importance_weights = (1.0 / probs).astype(jnp.float32)
+        importance_weights **= importance_sampling_exponent
+        importance_weights /= jnp.max(importance_weights)
+        batch_loss = jnp.square(target_q - q1) + jnp.square(target_q - q2)
+        loss_critic = jnp.mean(importance_weights * batch_loss)
+        return loss_critic, {
+            "q1": q1.mean(),
+            "q2": q2.mean(),
+            "reverb_updates": ReverbUpdate(keys, abs_td),
+        }
 
     return _loss_critic
 
@@ -143,6 +160,10 @@ class DrQConfig:
     temperature_adam_b1: float = 0.5
     init_temperature: float = 0.1
 
+    importance_sampling_exponent: float = 0.2  # Importance sampling for replay.
+    priority_exponent: float = 0.6  # Priority exponent for replay.
+    n_step: int = 1
+
 
 class TrainingState(NamedTuple):
     actor_params: hk.Params
@@ -189,27 +210,21 @@ class DrQAgent(core.Actor, core.VariableSource):
         # Setup reverb
         if config is None:
             config = DrQConfig()
-        replay_table = reverb.Table(
-            name=adders.DEFAULT_PRIORITY_TABLE,
-            sampler=reverb.selectors.Uniform(),
-            remover=reverb.selectors.Fifo(),
-            max_size=config.max_replay_size,
-            rate_limiter=rate_limiters.MinSize(config.min_replay_size),
-            signature=adders.NStepTransitionAdder.signature(
-                environment_spec=environment_spec
-            ),
+        self._config = config
+
+        reverb_replay = replay.make_reverb_prioritized_nstep_replay(
+            environment_spec=environment_spec,
+            n_step=config.n_step,
+            batch_size=config.batch_size,
+            max_replay_size=config.max_replay_size,
+            min_replay_size=config.min_replay_size,
+            priority_exponent=config.priority_exponent,
+            discount=config.discount,
         )
+        self._server = reverb_replay.server
 
-        # Hold a reference to server to prevent from being gc'ed.
-        self._server = reverb.Server([replay_table], port=None)
-
-        address = f"localhost:{self._server.port}"
-        # The dataset provides an interface to sample from replay.
-        dataset = datasets.make_reverb_dataset(
-            server_address=address, batch_size=config.batch_size, transition_adder=True
-        )
-
-        self._iterator = dataset.as_numpy_iterator()
+        self._iterator = reverb_replay.data_iterator
+        self._reverb_client = reverb_replay.client
 
         self._rng = hk.PRNGSequence(seed)
         self._initial_num_steps = config.initial_num_steps
@@ -278,7 +293,11 @@ class DrQAgent(core.Actor, core.VariableSource):
 
         # Setup losses
         critic_loss_fn = make_critic_loss_fn(
-            self._encoder.apply, self._actor.apply, self._critic.apply, config.discount
+            self._encoder.apply,
+            self._actor.apply,
+            self._critic.apply,
+            config.discount,
+            config.importance_sampling_exponent,
         )
         actor_loss_fn = make_actor_loss_fn(
             self._encoder.apply, self._actor.apply, self._critic.apply
@@ -360,9 +379,7 @@ class DrQAgent(core.Actor, core.VariableSource):
         # Setup actors
         # The adder is used to insert observations into replay.
         # discount is 1.0 as we are multiplying gamma during learner step
-        adder = adders.NStepTransitionAdder(
-            client=reverb.Client(address), n_step=1, discount=1.0
-        )
+        adder = reverb_replay.adder
 
         def forward_fn(params, observation):
             feature_map = self._encoder.apply(params["encoder"], observation)
@@ -422,7 +439,15 @@ class DrQAgent(core.Actor, core.VariableSource):
 
         state = self._state
         state, loss, critic_metrics = self._update_critic(state, next(self._rng), batch)
+        reverb_update = critic_metrics.pop("reverb_updates")
+        replay_client = self._reverb_client
         metrics = {"critic_loss": loss, **critic_metrics}
+
+        reverb_update = reverb_update._replace(keys=batch.info.key)
+        replay_client.mutate_priorities(
+            table=self._config.replay_table_name,
+            updates=dict(zip(reverb_update.keys, reverb_update.priorities)),
+        )
 
         # Update actor and alpha.
         if self._num_learning_steps % self._actor_update_frequency == 0:
