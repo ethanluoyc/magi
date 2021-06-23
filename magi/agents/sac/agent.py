@@ -58,11 +58,12 @@ class SACAgentFromConfig(core.Actor):
         logger: Optional[loggers.Logger] = None,
         counter: Optional[counting.Counter] = None,
     ):
-        learner_key, actor_key, random_key = jax.random.split(
-            jax.random.PRNGKey(seed), 3
+        learner_key, actor_key, random_key, rng = jax.random.split(
+            jax.random.PRNGKey(seed), 4
         )
         self._num_observations = 0
         self._initial_num_steps = config.initial_num_steps
+        self._rng = hk.PRNGSequence(rng)
 
         replay_table = reverb.Table(
             name=config.replay_table_name,
@@ -120,6 +121,7 @@ class SACAgentFromConfig(core.Actor):
         )
 
         client = variable_utils.VariableClient(self._learner, "")
+        self.policy = policy
         self._actor = acting_lib.SACActor(
             policy.apply, actor_key, is_eval=False, variable_client=client, adder=adder
         )
@@ -150,10 +152,10 @@ class SACAgentFromConfig(core.Actor):
         self._actor.update(wait=True)
 
     def get_variables(self, names: Sequence[str]):
-        return [self._learner.get_variables(names)]
+        return self._learner.get_variables(names)
 
     def make_actor(self, is_eval=True):
-        client = variable_utils.VariableClient(self, "")
+        client = variable_utils.VariableClient(self._learner, "")
         return acting_lib.SACActor(
             self.policy.apply, next(self._rng), is_eval=is_eval, variable_client=client
         )
