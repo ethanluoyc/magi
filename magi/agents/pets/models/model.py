@@ -311,12 +311,12 @@ class ModelEnv:
             rng, obs, state, terminated, total_rewards = inputs
             rng, rng_step = jax.random.split(rng)
             action_batch = jnp.repeat(actions_for_step, num_particles, axis=0)
-            obs, costs, dones = self.step(
+            obs, rewards, dones = self.step(
                 params, state, propagation_id, rng_step, obs, action_batch, goal
             )
-            costs = jnp.where(terminated, 0, costs)
+            rewards = jnp.where(terminated, 0, rewards)
             terminated = dones | terminated
-            total_rewards = total_rewards + costs
+            total_rewards = total_rewards + rewards
             return (rng, obs, state, terminated, total_rewards), None
 
         output, _ = jax.lax.scan(
