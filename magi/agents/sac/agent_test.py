@@ -12,14 +12,16 @@ from magi.agents.sac.agent import SACAgent
 
 def policy_fn(action_spec):
     def fn(x):
-        return networks.GaussianPolicy(action_size=action_spec.shape[0])(x)
+        return networks.GaussianPolicy(
+            hidden_units=(32, 32), action_size=action_spec.shape[0]
+        )(x)
 
     return fn
 
 
 def critic_fn():
     def fn(x, a):
-        critic = networks.DoubleCritic()
+        critic = networks.DoubleCritic(hidden_units=(32, 32))
         return critic(x, a)
 
     return fn
