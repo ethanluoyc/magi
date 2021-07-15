@@ -53,7 +53,7 @@ def main(unused_argv):
         hidden_sizes=config.hidden_sizes,
         population_size=config.population_size,
         activation=jax.nn.silu,
-        planning_horizon=config.task_horizon,
+        planning_horizon=config.planning_horizon,
         cem_alpha=config.cem_alpha,
         cem_elite_frac=config.cem_elite_frac,
         cem_return_mean_elites=config.cem_return_mean_elites,
