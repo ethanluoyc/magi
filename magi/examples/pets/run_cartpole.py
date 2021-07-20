@@ -8,7 +8,6 @@ from absl import flags
 import acme
 from acme import specs
 from acme import wrappers
-from acme.utils import loggers
 from gym.wrappers import TimeLimit
 import jax
 import numpy as np
@@ -16,6 +15,7 @@ import numpy as np
 from magi.agents.pets import builder
 from magi.environments.cartpole_continuous import CartPoleEnv
 from magi.examples.pets import configs
+from magi.utils import loggers
 
 FLAGS = flags.FLAGS
 flags.DEFINE_integer("num_episodes", int(100), "Number of episodes.")
