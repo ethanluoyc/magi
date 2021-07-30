@@ -21,3 +21,5 @@ distrax
 dm-acme[jax,tf,reverb] @ git+git://github.com/deepmind/acme.git@0.2.1#egg=dm-acme
 pandas
 wandb
+
+ml_collections

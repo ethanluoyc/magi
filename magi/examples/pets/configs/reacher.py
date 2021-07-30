@@ -1,44 +1,37 @@
-import dataclasses
-from typing import Callable
-
 import jax
 import jax.numpy as np
 
-from magi.examples.pets.configs.default import Config
+from magi.examples.pets.configs import base
 
 
-@dataclasses.dataclass
-class ReacherConfig(Config):
-    task_horizon = 150
-    planning_horizon: int = 25
-    activation: Callable = jax.nn.swish
-    lr: float = 7.5e-4
-    weight_decay: float = 5e-4
-    population_size: int = 400
-    num_epochs: int = 5
-    patience: int = 5
+def get_config():
+    config = base.get_base_config()
 
-    @staticmethod
+    config.task_horizon = 150
+    config.planning_horizon = 25
+    config.activation = jax.nn.swish
+    config.lr = 7.5e-4
+    config.weight_decay = 5e-4
+    config.population_size = 400
+    config.num_epochs = 5
+    config.patience = 5
+
     def get_goal(env):
         return env.goal
 
-    @staticmethod
     def obs_cost_fn(obs, goal):
-        ee_pos = ReacherConfig.get_ee_pos(obs)
+        ee_pos = get_ee_pos(obs)
         assert len(obs.shape) == 2
         assert len(ee_pos.shape) == 2
         assert len(goal.shape) == 1
         return np.sum(np.square(ee_pos - goal), axis=1)
 
-    @staticmethod
     def ac_cost_fn(acs):
         return 0.01 * np.sum(np.square(acs), axis=1)
 
-    @staticmethod
     def reward_fn(obs, act, goal):
-        return -(ReacherConfig.obs_cost_fn(obs, goal) + ReacherConfig.ac_cost_fn(act))
+        return -(obs_cost_fn(obs, goal) + ac_cost_fn(act))
 
-    @staticmethod
     def get_ee_pos(states):
         theta1, theta2, theta3, theta4, theta5, theta6, theta7 = (
             states[:, :1],
@@ -97,14 +90,19 @@ class ReacherConfig(Config):
             )
         return cur_end
 
-    @staticmethod
     def obs_preproc(obs):
         return obs
 
-    @staticmethod
     def obs_postproc(obs, pred):
         return obs + pred
 
-    @staticmethod
     def targ_proc(obs, next_obs):
         return next_obs - obs
+
+    config.env_name = "reacher"
+    config.get_goal = get_goal
+    config.obs_preproc = obs_preproc
+    config.obs_postproc = obs_postproc
+    config.targ_proc = targ_proc
+    config.reward_fn = reward_fn
+    return config

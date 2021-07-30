@@ -12,6 +12,8 @@ from acme import wrappers
 import dm_env
 from gym import wrappers as gym_wrappers
 import jax
+import ml_collections
+from ml_collections import config_flags
 import numpy as np
 
 from magi.agents.pets import builder
@@ -19,47 +21,50 @@ from magi.environments.pets_cartpole import CartpoleEnv
 from magi.environments.pets_halfcheetah import HalfCheetahEnv
 from magi.environments.pets_pusher import PusherEnv
 from magi.environments.pets_reacher import Reacher3DEnv
-from magi.examples.pets import configs
 from magi.utils import loggers
 
 FLAGS = flags.FLAGS
+config_flags.DEFINE_config_file("config")
+flags.mark_flag_as_required("config")
 flags.DEFINE_bool("wandb", False, "whether to log result to wandb")
 flags.DEFINE_string("wandb_project", "magi", "wandb project name")
 flags.DEFINE_string("wandb_entity", "ethanluoyc", "wandb project entity")
-flags.DEFINE_string("env", "halfcheetah", "environment")
 flags.DEFINE_integer("num_episodes", int(100), "Number of episodes.")
 flags.DEFINE_integer("seed", 0, "Random seed.")
 
-ENV_CONFIG_MAP = {
-    "reacher": (Reacher3DEnv, configs.ReacherConfig),
-    "pusher": (PusherEnv, configs.PusherConfig),
-    "halfcheetah": (HalfCheetahEnv, configs.HalfCheetahConfig),
-    "cartpole": (CartpoleEnv, configs.CartPoleConfig),
+ENV_MAP = {
+    "reacher": Reacher3DEnv,
+    "pusher": PusherEnv,
+    "halfcheetah": HalfCheetahEnv,
+    "cartpole": CartpoleEnv,
 }
 
 
-def make_environment(name, seed) -> Tuple[dm_env.Environment, configs.Config]:
+def make_environment(
+    name, seed
+) -> Tuple[dm_env.Environment, ml_collections.ConfigDict]:
     """Creates an OpenAI Gym environment."""
     # Load the gym environment.
     try:
-        env_cls, cfg_cls = ENV_CONFIG_MAP[name]
+        env_cls = ENV_MAP[name]
         environment = env_cls()
-        cfg = cfg_cls()
     except KeyError as e:
         raise ValueError(f"Unknown environment {name}") from e
     else:
-        environment = gym_wrappers.TimeLimit(environment, cfg.task_horizon)
+        environment = gym_wrappers.TimeLimit(environment, FLAGS.config.task_horizon)
         environment.seed(seed)
         environment = wrappers.GymWrapper(environment)
         environment = wrappers.SinglePrecisionWrapper(environment)
-        return environment, cfg
+        return environment, FLAGS.config
 
 
 def main(unused_argv):
     del unused_argv
     np.random.seed(FLAGS.seed)
     rng = np.random.default_rng(FLAGS.seed + 1)
-    environment, config = make_environment(FLAGS.env, int(rng.integers(0, 2 ** 32)))
+    environment, config = make_environment(
+        FLAGS.config.env_name, int(rng.integers(0, 2 ** 32))
+    )
     environment_spec = specs.make_environment_spec(environment)
     print("observation spec", environment_spec.observations.shape)
     print("action_spec", environment_spec.actions.shape)

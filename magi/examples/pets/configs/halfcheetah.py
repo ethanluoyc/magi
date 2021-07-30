@@ -1,35 +1,27 @@
-import dataclasses
-from typing import Callable, Sequence
-
 import jax
 import jax.numpy as jnp
 
-from magi.examples.pets.configs.default import Config
+from magi.examples.pets.configs import base
 
 
-@dataclasses.dataclass
-class HalfCheetahConfig(Config):
-    task_horizon: int = 1000
-    hidden_sizes: Sequence[int] = (200, 200, 200, 200)
-    population_size: int = 350
-    activation: Callable = jax.nn.silu
-    planning_horizon: int = 30
-    cem_alpha: float = 0.1
-    cem_elite_frac: float = 0.1
-    cem_return_mean_elites: bool = True
-    weight_decay: float = 3e-5
-    lr: float = 2e-4
-    min_delta: float = 0.01
-    num_ensembles: int = 5
-    num_particles: int = 20
-    num_epochs: int = 25
-    patience: int = 25
+def get_config():
+    config = base.get_base_config()
+    config.task_horizon = 1000
+    config.hidden_sizes = (200, 200, 200, 200)
+    config.population_size = 350
+    config.activation = jax.nn.silu
+    config.planning_horizon = 30
+    config.cem_alpha = 0.1
+    config.cem_elite_frac = 0.1
+    config.cem_return_mean_elites = True
+    config.weight_decay = 3e-5
+    config.lr = 2e-4
+    config.min_delta = 0.01
+    config.num_ensembles = 5
+    config.num_particles = 20
+    config.num_epochs = 25
+    config.patience = 25
 
-    def get_goal(self, env):
-        # Cheetah does not have a goal
-        del env
-
-    @staticmethod
     def obs_preproc(state):
         assert isinstance(state, jnp.ndarray)
         assert state.ndim in (1, 2, 3)
@@ -51,25 +43,27 @@ class HalfCheetahConfig(Config):
             ret = ret.squeeze()
         return ret
 
-    @staticmethod
     def obs_postproc(obs, pred):
         return jnp.concatenate([pred[:, :1], obs[:, 1:] + pred[:, 1:]], axis=1)
 
-    @staticmethod
     def targ_proc(obs, next_obs):
         assert len(obs.shape) == 2
         assert len(next_obs.shape) == 2
         return jnp.concatenate([next_obs[:, :1], next_obs[:, 1:] - obs[:, 1:]], axis=1)
 
-    @staticmethod
     def obs_cost_fn(obs):
         return -obs[:, 0]
 
-    @staticmethod
     def ac_cost_fn(acs):
         return 0.1 * (acs ** 2).sum(axis=1)
 
-    @staticmethod
     def reward_fn(obs, acs, goal):
         del goal
-        return -(HalfCheetahConfig.obs_cost_fn(obs) + HalfCheetahConfig.ac_cost_fn(acs))
+        return -(obs_cost_fn(obs) + ac_cost_fn(acs))
+
+    config.env_name = "halfcheetah"
+    config.obs_preproc = obs_preproc
+    config.obs_postproc = obs_postproc
+    config.targ_proc = targ_proc
+    config.reward_fn = reward_fn
+    return config
