@@ -12,6 +12,7 @@ from acme import wrappers
 import dm_env
 from gym import wrappers as gym_wrappers
 import jax
+import ml_collections
 from ml_collections import config_flags
 import numpy as np
 
@@ -20,7 +21,6 @@ from magi.environments.pets_cartpole import CartpoleEnv
 from magi.environments.pets_halfcheetah import HalfCheetahEnv
 from magi.environments.pets_pusher import PusherEnv
 from magi.environments.pets_reacher import Reacher3DEnv
-from magi.examples.pets import configs
 from magi.utils import loggers
 
 FLAGS = flags.FLAGS
@@ -40,7 +40,9 @@ ENV_MAP = {
 }
 
 
-def make_environment(name, seed) -> Tuple[dm_env.Environment, configs.Config]:
+def make_environment(
+    name, seed
+) -> Tuple[dm_env.Environment, ml_collections.ConfigDict]:
     """Creates an OpenAI Gym environment."""
     # Load the gym environment.
     try:
