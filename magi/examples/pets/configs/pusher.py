@@ -1,40 +1,33 @@
-import dataclasses
-from typing import Callable
-
 import jax
 import jax.numpy as np
 
-from magi.examples.pets.configs.default import Config
+from magi.examples.pets.configs import base
 
 
-@dataclasses.dataclass
-class PusherConfig(Config):
-    task_horizon: int = 150
-    planning_horizon: int = 30
-    activation: Callable = jax.nn.swish
-    lr: float = 1e-3
-    weight_decay: float = 4e-4
-    population_size: int = 500
-    num_epochs: int = 5
-    patience: int = 5
+def get_config():
+    config = base.get_base_config()
 
-    @staticmethod
+    config.task_horizon = 150
+    config.planning_horizon = 30
+    config.activation = jax.nn.swish
+    config.lr = 1e-3
+    config.weight_decay = 4e-4
+    config.population_size = 500
+    config.num_epochs = 5
+    config.patience = 5
+
     def get_goal(env):
         return env.ac_goal_pos
 
-    @staticmethod
     def obs_preproc(obs):
         return obs
 
-    @staticmethod
     def obs_postproc(obs, pred):
         return obs + pred
 
-    @staticmethod
     def targ_proc(obs, next_obs):
         return next_obs - obs
 
-    @staticmethod
     def obs_cost_fn(obs, goal):
         to_w, og_w = 0.5, 1.25
         tip_pos, obj_pos, goal_pos = obs[:, 14:17], obs[:, 17:20], goal
@@ -43,10 +36,16 @@ class PusherConfig(Config):
         obj_goal_dist = np.sum(np.abs(goal_pos - obj_pos), axis=1)
         return to_w * tip_obj_dist + og_w * obj_goal_dist
 
-    @staticmethod
     def ac_cost_fn(acs):
         return 0.1 * np.sum(np.square(acs), axis=1)
 
-    @staticmethod
     def reward_fn(obs, acs, goal):
-        return -(PusherConfig.obs_cost_fn(obs, goal) + PusherConfig.ac_cost_fn(acs))
+        return -(obs_cost_fn(obs, goal) + ac_cost_fn(acs))
+
+    config.env_name = "pusher"
+    config.get_goal = get_goal
+    config.obs_preproc = obs_preproc
+    config.obs_postproc = obs_postproc
+    config.targ_proc = targ_proc
+    config.reward_fn = reward_fn
+    return config

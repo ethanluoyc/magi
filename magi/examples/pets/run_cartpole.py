@@ -8,16 +8,18 @@ from absl import flags
 import acme
 from acme import specs
 from acme import wrappers
-from gym.wrappers import TimeLimit
+from gym import wrappers as gym_wrappers
 import jax
+from ml_collections import config_flags
 import numpy as np
 
 from magi.agents.pets import builder
 from magi.environments.cartpole_continuous import CartPoleEnv
-from magi.examples.pets import configs
 from magi.utils import loggers
 
 FLAGS = flags.FLAGS
+config_flags.DEFINE_config_file("config")
+flags.mark_flag_as_required("config")
 flags.DEFINE_integer("num_episodes", int(100), "Number of episodes.")
 flags.DEFINE_integer("seed", 0, "Random seed.")
 flags.DEFINE_bool("wandb", False, "whether to log result to wandb")
@@ -29,7 +31,7 @@ def make_environment(seed, task_horizon):
     """Creates an OpenAI Gym environment."""
     # Load the gym environment.
     environment = CartPoleEnv()
-    environment = TimeLimit(environment, task_horizon)
+    environment = gym_wrappers.TimeLimit(environment, task_horizon)
     environment.seed(seed)
     environment = wrappers.GymWrapper(environment)
     environment = wrappers.SinglePrecisionWrapper(environment)
@@ -38,7 +40,7 @@ def make_environment(seed, task_horizon):
 
 def main(unused_argv):
     del unused_argv
-    config = configs.CartPoleContinuousConfig()
+    config = FLAGS.config
     np.random.seed(FLAGS.seed)
     rng = np.random.default_rng(FLAGS.seed + 1)
     environment = make_environment(int(rng.integers(0, 2 ** 32)), config.task_horizon)
