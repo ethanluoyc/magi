@@ -26,7 +26,7 @@ Agent                                                          | Paper          
 Soft Actor-Critic (SAC)                                        | [Haarnoja et al., 2018]  | [sac](./sac)
 Soft Actor-Critic Auto-encoder (SAC-AE)                        | [Yarats et al., 2020]    | [sac_ae](./sac_ae)
 Data Regulalized Q (DrQ)                                       | [Kostrikov et al., 2020] | [drq](./drq)
-IMPALA                                                         | [Espeholt et al., 2018]  | [impala](./impala)
+IMPALA (single-process, distributed)                           | [Espeholt et al., 2018]  | [impala](./impala)
 
 
 ## Model-based
