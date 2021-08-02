@@ -1,1 +1,1 @@
-Run SAC on kuka grasp environment.
+The project has moved into a separate repo ethanluoyc/dd_grasp.

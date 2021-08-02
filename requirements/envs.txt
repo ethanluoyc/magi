@@ -1,4 +1,3 @@
+gym
 bsuite
 dm-control
-gym
-pybullet
