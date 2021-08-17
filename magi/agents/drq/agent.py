@@ -1,7 +1,7 @@
 import dataclasses
 from functools import partial
 import time
-from typing import Any, Mapping, NamedTuple, Optional
+from typing import Any, Callable, Mapping, NamedTuple, Optional
 
 from acme import core
 from acme import datasets
@@ -27,6 +27,7 @@ from magi.agents import actors
 from magi.agents.drq.augmentations import batched_random_crop
 from magi.agents.sac import acting
 
+DataAugmentation = Callable[[jnp.ndarray, types.NestedArray], types.NestedArray]
 batched_random_crop = jax.jit(batched_random_crop)
 
 
@@ -58,7 +59,13 @@ def make_critic_loss_fn(encoder_apply, actor_apply, critic_apply, gamma):
             encoder_apply(params_critic["encoder"], data.next_observation)
         )
         next_dist = actor_apply(params_actor, next_encoded)
-        next_actions, next_log_probs = next_dist.sample_and_log_prob(seed=key)
+        if hasattr(next_dist, "sample_and_log_prob"):
+            # Support Distrax sample_and_log_prob shortcut
+            next_actions, next_log_probs = next_dist.sample_and_log_prob(seed=key)
+        else:
+            # Fall back to calling sample and log_prob separately
+            next_actions = next_dist.sample(seed=key)
+            next_log_probs = next_dist.log_prob(next_actions)
 
         # Calculate q target values
         next_encoded_target = encoder_apply(
@@ -96,9 +103,14 @@ def make_actor_loss_fn(encoder_apply, actor_apply, critic_apply):
     ):
         data: types.Transition = batch.data
         encoded = encoder_apply(params_critic["encoder"], data.observation)
-        actions, log_probs = actor_apply(params_actor, encoded).sample_and_log_prob(
-            seed=key
-        )
+        action_dist = actor_apply(params_actor, encoded)
+        if hasattr(action_dist, "sample_and_log_prob"):
+            # Support Distrax sample_and_log_prob shortcut
+            actions, log_probs = action_dist.sample_and_log_prob(seed=key)
+        else:
+            # Fall back to calling sample and log_prob separately
+            actions = action_dist.sample(seed=key)
+            log_probs = action_dist.log_prob(actions)
         q1, q2 = critic_apply(params_critic["critic"], encoded, actions)
         chex.assert_rank((q1, q2, log_probs), [1, 1, 1])
         q = jnp.minimum(q1, q2)
@@ -142,6 +154,8 @@ class DrQConfig:
     temperature_learning_rate: float = 3e-4
     temperature_adam_b1: float = 0.5
     init_temperature: float = 0.1
+
+    augmentation: DataAugmentation = batched_random_crop
 
 
 class TrainingState(NamedTuple):
@@ -219,6 +233,7 @@ class DrQAgent(core.Actor, core.VariableSource):
         self._actor_update_frequency = config.actor_update_frequency
         self._critic_target_update_frequency = config.critic_target_update_frequency
         self._target_entropy = -float(np.prod(environment_spec.actions.shape))
+        self._augmentation = config.augmentation
         self._counter = counter if counter is not None else counting.Counter()
         self._logger = (
             logger
@@ -409,8 +424,8 @@ class DrQAgent(core.Actor, core.VariableSource):
         start = time.time()
         transitions = batch.data
         # data: types.Transition
-        observation = batched_random_crop(next(self._rng), transitions.observation)
-        next_observation = batched_random_crop(
+        observation = self._augmentation(next(self._rng), transitions.observation)
+        next_observation = self._augmentation(
             next(self._rng), transitions.next_observation
         )
         batch = ReplaySample(
