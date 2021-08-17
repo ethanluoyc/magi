@@ -151,7 +151,7 @@ class SACAgentFromConfig(core.Actor):
         self._actor.update(wait=True)
 
     def get_variables(self, names: Sequence[str]):
-        return [self._learner.get_variables(names)]
+        return self._learner.get_variables(names)
 
     def make_actor(self, key, is_eval=True):
         client = variable_utils.VariableClient(self, "")
