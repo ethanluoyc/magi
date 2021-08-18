@@ -11,7 +11,7 @@ from magi.utils import fakes
 
 
 class SACTest(absltest.TestCase):
-    def test_sac_ae(self):
+    def test_drq(self):
         # Create a fake environment to test with.
         environment = fakes.ContinuousVisualEnvironment(
             action_dim=2, observation_shape=(32, 32, 3), episode_length=10, bounded=True

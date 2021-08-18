@@ -10,7 +10,7 @@ def alpha_loss_fn(
     log_alpha: jnp.ndarray, entropy: jnp.ndarray, target_entropy: float
 ) -> jnp.ndarray:
     "Compute the temperature loss for EC-SAC."
-    return jnp.exp(log_alpha) * (entropy - target_entropy), ()
+    return log_alpha * (entropy - target_entropy), ()
 
 
 def actor_loss_fn(

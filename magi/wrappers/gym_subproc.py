@@ -9,7 +9,7 @@ import os
 import pickle
 import threading
 import traceback
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
 import gym
 
@@ -47,7 +47,7 @@ class SubprocEnv(gym.Env):
     def __init__(
         self,
         env_fn: Callable[[], gym.Env],
-        env_kwargs: Dict[str, Any] = None,
+        env_kwargs: Optional[Dict[str, Any]] = None,
         daemon: bool = True,
     ):
         if env_kwargs is None:

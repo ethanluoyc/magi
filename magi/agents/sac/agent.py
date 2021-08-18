@@ -120,6 +120,7 @@ class SACAgentFromConfig(core.Actor):
         )
 
         client = variable_utils.VariableClient(self._learner, "")
+        self.policy = policy
         self._actor = acting_lib.SACActor(
             policy.apply, actor_key, is_eval=False, variable_client=client, adder=adder
         )
@@ -150,12 +151,12 @@ class SACAgentFromConfig(core.Actor):
         self._actor.update(wait=True)
 
     def get_variables(self, names: Sequence[str]):
-        return [self._learner.get_variables(names)]
+        return self._learner.get_variables(names)
 
-    def make_actor(self, is_eval=True):
+    def make_actor(self, key, is_eval=True):
         client = variable_utils.VariableClient(self, "")
         return acting_lib.SACActor(
-            self.policy.apply, next(self._rng), is_eval=is_eval, variable_client=client
+            self.policy.apply, key, is_eval=is_eval, variable_client=client
         )
 
 

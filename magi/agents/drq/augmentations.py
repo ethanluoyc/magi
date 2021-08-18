@@ -1,3 +1,4 @@
+"""Data augmentations used in DrQ."""
 # From https://github.com/ikostrikov/jax-rl/blob/main/jax_rl/agents/drq/augmentations.py
 import jax
 import jax.numpy as jnp
