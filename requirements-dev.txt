@@ -1,6 +1,6 @@
 # Testing
-pytest
-pytest-xdist
+pytest==6.2.5
+pytest-xdist==2.3.0
 # Linting, typechecking, formatting, pre-commit hooks
 pylint==2.8.2
 isort==5.8.0

@@ -10,7 +10,6 @@ test:
 	JAX_PLATFORM_NAME=cpu pytest -n $(N_CPUS) \
 		--color=yes \
 		-rf \
-		--ignore=magi/agents/archived \
 		--ignore=magi/experimental \
 		$(SRC)
 
@@ -35,5 +34,6 @@ lint:
 .PHONY: install
 install:
 	pip install -U pip setuptools wheel
-	pip install -U --upgrade-strategy eager -f https://storage.googleapis.com/jax-releases/jax_releases.html -e .
-	pip install -U --upgrade-strategy eager -e '.[envs,dev]'
+	pip install -r requirements-dev.txt
+	pip install -r requirements.txt
+	pip install -U --upgrade-strategy eager -e '.[envs]'
