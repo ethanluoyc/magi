@@ -1,0 +1,3 @@
+# Additional requirements for running D4RL experiments
+mujoco-py==1.50.1.1
+d4rl @ git+https://github.com/rail-berkeley/d4rl@master
