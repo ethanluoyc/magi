@@ -40,10 +40,10 @@ class TD3Learner(acme.Learner):
         policy_optimizer: Optional[optax.GradientTransformation] = None,
         critic_optimizer: Optional[optax.GradientTransformation] = None,
         discount: float = 0.99,
-        tau: float = 0.005,
+        soft_update_rate: float = 0.005,
         policy_noise: float = 0.2,
-        noise_clip: float = 0.5,
-        policy_update_period: int = 2,
+        policy_noise_clip: float = 0.5,
+        policy_target_update_period: int = 2,
         logger: Optional[loggers.Logger] = None,
         counter: Optional[counting.Counter] = None,
     ):
@@ -61,10 +61,10 @@ class TD3Learner(acme.Learner):
         self._action_spec: specs.BoundedArray = environment_spec.actions
         self._data_iterator = iterator
         self._discount = discount
-        self._tau = tau
+        self._soft_update_rate = soft_update_rate
         self._policy_noise = policy_noise
-        self._noise_clip = noise_clip
-        self._policy_update_period = policy_update_period
+        self._policy_noise_clip = policy_noise_clip
+        self._policy_target_update_period = policy_target_update_period
         self._learning_steps = 0
         self._logger = logger or loggers.make_default_logger("learner", save_data=False)
         self._counter = counter or counting.Counter()
@@ -109,7 +109,7 @@ class TD3Learner(acme.Learner):
                 q, _ = self._critic_network.apply(
                     critic_params, transitions.observation, a_t
                 )
-                policy_loss = jnp.mean(q, axis=0)
+                policy_loss = -jnp.mean(q, axis=0)
                 return policy_loss
 
             loss, grads = jax.value_and_grad(loss_fn)(policy_params)
@@ -138,8 +138,8 @@ class TD3Learner(acme.Learner):
                 noise = jnp.clip(
                     jax.random.normal(key, transitions.action.shape)
                     * self._policy_noise,
-                    -self._noise_clip,
-                    self._noise_clip,
+                    -self._policy_noise_clip,
+                    self._policy_noise_clip,
                 )
 
                 next_action = self._policy_network.apply(
@@ -186,12 +186,12 @@ class TD3Learner(acme.Learner):
                 policy_target_params=optax.incremental_update(
                     state.policy_params,
                     state.policy_target_params,
-                    tau,
+                    soft_update_rate,
                 ),
                 critic_target_params=optax.incremental_update(
                     state.critic_params,
                     state.critic_target_params,
-                    tau,
+                    soft_update_rate,
                 ),
             )
 
@@ -200,7 +200,6 @@ class TD3Learner(acme.Learner):
         self._update_target = _update_target
 
     def step(self):
-        self._learning_steps += 1
 
         # Sample replay buffer
         batch = next(self._data_iterator)
@@ -212,7 +211,7 @@ class TD3Learner(acme.Learner):
         metrics.update(critic_metrics)
 
         # Delayed policy and target network updates
-        if self._learning_steps % self._policy_update_period == 0:
+        if self._learning_steps % self._policy_target_update_period == 0:
             self._state, policy_metrics = self._update_policy(
                 self._state,
                 batch,
@@ -224,6 +223,7 @@ class TD3Learner(acme.Learner):
         counts = self._counter.increment(steps=1)
         metrics.update(counts)
 
+        self._learning_steps += 1
         self._logger.write(metrics)
 
     def get_variables(self, names):

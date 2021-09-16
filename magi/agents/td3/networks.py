@@ -1,47 +1,46 @@
 """Default network architectures for TD3."""
+from typing import Dict, Sequence
+
+from acme import specs
+from acme.jax import networks
 import haiku as hk
-import jax
 import jax.numpy as jnp
+import numpy as np
 
 
-class Actor(hk.Module):
-    def __init__(self, action_dim, max_action):
-        super().__init__()
+def make_default_networks(
+    action_spec: specs.BoundedArray,
+    policy_layer_sizes: Sequence[int] = (256, 256),
+    critic_layer_sizes: Sequence[int] = (256, 256),
+) -> Dict[str, hk.Transformed]:
+    """Make default networks used by TD3."""
+    action_size = np.prod(action_spec.shape, dtype=int)
 
-        self.l1 = hk.Linear(256)
-        self.l2 = hk.Linear(256)
-        self.l3 = hk.Linear(action_dim)
+    def critic(h):
+        output = hk.Sequential(
+            [
+                hk.nets.MLP(critic_layer_sizes, activate_final=True),
+                hk.Linear(1),
+            ]
+        )(h)
+        return jnp.squeeze(output, axis=-1)
 
-        self.max_action = max_action
+    def double_critic(obs, a):
+        h = jnp.concatenate([obs, a], axis=-1)
+        q1 = critic(h)
+        q2 = critic(h)
+        return q1, q2
 
-    def __call__(self, state):
-        a = jax.nn.relu(self.l1(state))
-        a = jax.nn.relu(self.l2(a))
-        return self.max_action * jnp.tanh(self.l3(a))
+    def policy(obs):
+        return hk.Sequential(
+            [
+                hk.nets.MLP(policy_layer_sizes, activate_final=True),
+                hk.Linear(action_size),
+                networks.TanhToSpec(action_spec),
+            ]
+        )(obs)
 
+    critic_network = hk.without_apply_rng(hk.transform(double_critic))
+    policy_network = hk.without_apply_rng(hk.transform(policy))
 
-class Critic(hk.Module):
-    def __init__(self):
-        super().__init__()
-        # Q1 architecture
-        self.l1 = hk.Linear(256)
-        self.l2 = hk.Linear(256)
-        self.l3 = hk.Linear(1)
-
-        # Q2 architecture
-        self.l4 = hk.Linear(256)
-        self.l5 = hk.Linear(256)
-        self.l6 = hk.Linear(1)
-
-    def __call__(self, state, action):
-        sa = jnp.concatenate([state, action], axis=1)
-
-        q1 = jax.nn.relu(self.l1(sa))
-        q1 = jax.nn.relu(self.l2(q1))
-        q1 = self.l3(q1)
-
-        q2 = jax.nn.relu(self.l4(sa))
-        q2 = jax.nn.relu(self.l5(q2))
-        q2 = self.l6(q2)
-        return jnp.squeeze(q1, axis=-1), jnp.squeeze(q2, axis=-1)
-
+    return {"critic": critic_network, "policy": policy_network}

@@ -9,13 +9,12 @@ from acme.agents.jax import actors as acting_lib
 from acme.jax import variable_utils
 import d4rl  # type: ignore
 import gym
-import haiku as hk
 import jax
 import numpy as np
 import tensorflow as tf
 import wandb
 
-from magi.agents.td3 import networks as network_lib
+from magi.agents import td3
 from magi.agents.td3_bc import learning
 from magi.examples.offline import d4rl_dataset
 
@@ -67,18 +66,6 @@ def evaluate(actor, env_name, seed, mean, std, seed_offset=100, eval_episodes=10
     return d4rl_score
 
 
-def make_networks(environment_spec: specs.EnvironmentSpec):
-    action_dim = environment_spec.actions.shape[0]
-    max_action = float(environment_spec.actions.maximum[0])
-    policy = hk.without_apply_rng(
-        hk.transform(lambda obs: network_lib.Actor(action_dim, max_action)(obs))
-    )
-    critic = hk.without_apply_rng(
-        hk.transform(lambda obs, a: network_lib.Critic()(obs, a))
-    )
-    return {"policy": policy, "critic": critic}
-
-
 def make_environment(name):
     environment = gym.make(name)
     environment = wrappers.GymWrapper(environment)
@@ -118,7 +105,7 @@ def main(_):
     env.seed(FLAGS.seed)
 
     max_action = environment_spec.actions.maximum[0]
-    agent_networks = make_networks(environment_spec)
+    agent_networks = td3.make_default_networks(environment_spec.actions)
     data = d4rl.qlearning_dataset(env)
     if FLAGS.normalize:
         data, mean, std = d4rl_dataset.normalize_obs(data)
