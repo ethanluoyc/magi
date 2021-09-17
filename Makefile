@@ -36,4 +36,4 @@ install:
 	pip install -U pip setuptools wheel
 	pip install -r requirements-dev.txt
 	pip install -r requirements.txt
-	pip install -U .
+	pip install -e .
