@@ -1,5 +1,4 @@
 """Soft Actor-Critic implementation"""
-import dataclasses
 from typing import Optional, Sequence
 
 from acme import core
@@ -19,32 +18,8 @@ from reverb import rate_limiters
 
 from magi.agents import actors
 from magi.agents.sac import acting as acting_lib
+from magi.agents.sac import config as sac_config
 from magi.agents.sac import learning as learning_lib
-
-
-@dataclasses.dataclass
-class SACConfig:
-    min_replay_size: int = 1
-    max_replay_size: int = 1_000_000
-    replay_table_name: str = adders.DEFAULT_PRIORITY_TABLE
-    prefetch_size: Optional[int] = None
-
-    discount: float = 0.99
-    batch_size: int = 256
-    initial_num_steps: int = 10000
-
-    critic_learning_rate: float = 1e-3
-    critic_target_update_frequency: int = 2
-    critic_soft_update_rate: float = 0.01
-
-    actor_learning_rate: float = 1e-3
-    actor_update_frequency: int = 2
-
-    max_gradient_norm: float = 0.5
-
-    temperature_learning_rate: float = 1e-4
-    temperature_adam_b1: float = 0.5
-    init_temperature: float = 0.1
 
 
 class SACAgentFromConfig(core.Actor):
@@ -54,7 +29,7 @@ class SACAgentFromConfig(core.Actor):
         policy: hk.Transformed,
         critic: hk.Transformed,
         seed: int,
-        config: SACConfig,
+        config: sac_config.SACConfig,
         logger: Optional[loggers.Logger] = None,
         counter: Optional[counting.Counter] = None,
     ):
@@ -180,7 +155,7 @@ class SACAgent(SACAgentFromConfig):
         logger: Optional[loggers.Logger] = None,
         counter: Optional[counting.Counter] = None,
     ):
-        config = SACConfig(
+        config = sac_config.SACConfig(
             discount=discount,
             max_replay_size=max_replay_size,
             batch_size=batch_size,
