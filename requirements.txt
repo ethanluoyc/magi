@@ -18,5 +18,5 @@ python-dateutil==2.8.2
 rlax==0.0.4
 tensorflow==2.6.0
 tensorflow-estimator==2.6.0
-tfp-nightly==0.14.0.dev20210908
+tfp-nightly==0.14.0.dev20210818
 wandb==0.12.1
