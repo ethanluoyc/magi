@@ -23,6 +23,7 @@ source venv/bin/activate
 2. Install dependencies and the package in editable mode by running
 
 ```bash
+pip install -U pip setuptools wheel
 pip install -r requirements.txt # This uses pinned dependencies, you may adjust this for your needs.
 pip install -e .
 ```
