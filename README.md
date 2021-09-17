@@ -15,26 +15,16 @@ _Note_: Magi is in alpha development so expect breaking changes!
 
 ## Installation
 1. Create a new Python virtual environment
-```python
+```bash
 python3 -m venv venv
+source venv/bin/activate
 ```
 
 2. Install dependencies and the package in editable mode by running
 
-```python
-pip install jax==0.2.11 jaxlib==0.1.64
-pip install -e '.[dev,envs]'
-```
-
-Magi is tested against jax==0.2.11 and jaxlib==0.1.64 but it should also work
-with more recent versions of jax and jaxlib.
-Note that the installation above uses the CPU verison of JAX.
-If you want to use JAX with the CUDA backend, follow the instructions
-on JAX's GitHub repo for how to install the CUDA-enabled version of jaxlib.
-For CUDA 11.3, you can replace the commands above with
-
 ```bash
-pip install jax==0.2.11 jaxlib==0.1.64+cuda111 -f https://storage.googleapis.com/jax-releases/jax_releases.html # will use the jaxlib version with CUDA 11.3 support
+pip install -r requirements.txt # This uses pinned dependencies, you may adjust this for your needs.
+pip install -e .
 ```
 
 If for some reason installation fails, first check out GitHub Actions
