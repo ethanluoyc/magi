@@ -4,6 +4,7 @@ from absl import app
 from absl import flags
 from absl import logging
 from acme import specs
+from acme import types
 from acme import wrappers
 from acme.agents.jax import actors as acting_lib
 from acme.jax import networks as networks_lib
@@ -138,15 +139,35 @@ def main(_):
         data, mean, std = d4rl_dataset.normalize_obs(data)
     else:
         mean, std = 0, 1
-    data_iterator = d4rl_dataset.make_tf_data_iterator(
-        data, batch_size=FLAGS.batch_size
-    ).as_numpy_iterator()
+    # data_iterator = d4rl_dataset.make_tf_data_iterator(
+    #     data, batch_size=FLAGS.batch_size
+    # ).as_numpy_iterator()
+    # def _wrap_iterator(data_iterator):
+    #     for d in data_iterator:
+    #         yield d.data
+    # data_iterator = _wrap_iterator(data_iterator)
 
-    def _wrap_iterator(data_iterator):
-        for d in data_iterator:
-            yield d.data
+    def get_iterator(data, batch_size):
+        # Unlike the data iterator above,
+        # this does not sample a mini-batch uniformly from the offline dataset.
+        ds = tf.data.Dataset.from_tensor_slices(
+            types.Transition(
+                observation=data["observations"],
+                action=data["actions"],
+                reward=data["rewards"],
+                discount=1 - tf.cast(data["terminals"], tf.float32),
+                next_observation=data["next_observations"],
+                extras=(),
+            )
+        )
+        return (
+            ds.repeat()
+            .shuffle(len(data["rewards"]))
+            .batch(batch_size, drop_remainder=True)
+        )
 
-    data_iterator = _wrap_iterator(data_iterator)
+    data_iterator = get_iterator(data, FLAGS.batch_size)
+    data_iterator = data_iterator.as_numpy_iterator()
     random_key = jax.random.PRNGKey(FLAGS.seed)
     learner_key, actor_key = jax.random.split(random_key)
     loss_fn = bc.logp(
