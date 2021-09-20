@@ -8,6 +8,8 @@ from acme import core
 from acme import specs
 from acme import types
 from acme.jax import utils
+from acme.utils import counting
+from acme.utils import loggers
 import haiku as hk
 import jax
 import jax.numpy as jnp
@@ -44,6 +46,8 @@ class TD3BCLearner(core.Learner):
         noise_clip: float = 0.5,
         policy_update_period: int = 2,
         alpha: float = 2.5,
+        logger: Optional[loggers.Logger] = None,
+        counter: Optional[counting.Counter] = None,
     ):
 
         self.policy_optimizer = (
@@ -64,6 +68,8 @@ class TD3BCLearner(core.Learner):
         self.policy_update_period = policy_update_period
         self.alpha = alpha
         self._learning_steps = 0
+        self._logger = logger or loggers.make_default_logger("learner")
+        self._counter = counter or counting.Counter()
 
         def init_state():
             dummy_obs = utils.add_batch_dim(
@@ -106,11 +112,17 @@ class TD3BCLearner(core.Learner):
                 )
                 lambda_ = jax.lax.stop_gradient(self.alpha / jnp.abs(q).mean(axis=0))
                 bc_loss = jnp.mean(jnp.square(a_t - transitions.action))
-                policy_loss = jnp.mean(q, axis=0)
-                actor_loss = -lambda_ * policy_loss + bc_loss
-                return actor_loss
+                policy_loss = -jnp.mean(q, axis=0)
+                loss = lambda_ * policy_loss + bc_loss
+                metrics = {
+                    "policy_loss": policy_loss,
+                    "bc_loss": bc_loss,
+                    "lambda": lambda_,
+                }
 
-            loss, grads = jax.value_and_grad(loss_fn)(policy_params)
+                return loss, metrics
+
+            grads, metrics = jax.grad(loss_fn, has_aux=True)(policy_params)
             update, new_policy_opt_state = self.policy_optimizer.update(
                 grads, policy_opt_state
             )
@@ -121,7 +133,7 @@ class TD3BCLearner(core.Learner):
                 policy_opt_state=new_policy_opt_state,
             )
 
-            return new_state, {"actor_loss": loss}
+            return new_state, metrics
 
         @jax.jit
         def _update_critic(state: TrainingState, batch: reverb.ReplaySample, key):
@@ -165,9 +177,13 @@ class TD3BCLearner(core.Learner):
                 q2_loss = _mse_loss(q2, q_target)
 
                 critic_loss = q1_loss + q2_loss
-                return critic_loss
+                return critic_loss, {
+                    "critic_loss": critic_loss,
+                    "q1": jnp.mean(q1, axis=0),
+                    "q2": jnp.mean(q2, axis=0),
+                }
 
-            loss, grads = jax.value_and_grad(loss_fn)(critic_params)
+            grads, metrics = jax.grad(loss_fn, has_aux=True)(critic_params)
             updates, new_critic_opt_state = self.critic_optimizer.update(
                 grads, critic_opt_state
             )
@@ -176,7 +192,7 @@ class TD3BCLearner(core.Learner):
                 critic_params=new_critic_params,
                 critic_opt_state=new_critic_opt_state,
             )
-            return new_state, {"critic_loss": loss}
+            return new_state, metrics
 
         @jax.jit
         def _update_target(state: TrainingState):
@@ -203,17 +219,26 @@ class TD3BCLearner(core.Learner):
         # Sample replay buffer
         batch = next(self._data_iterator)
 
-        self._state, _ = self._update_critic(
+        metrics = {}
+        self._state, critic_metrics = self._update_critic(
             self._state,
             batch,
             next(self._rng),
         )
+        metrics.update(critic_metrics)
 
         # Delayed policy and target network updates
         if self._learning_steps % self.policy_update_period == 0:
-            self._state, _ = self._update_actor(self._state, batch, next(self._rng))
+            self._state, actor_metrics = self._update_actor(
+                self._state, batch, next(self._rng)
+            )
+            metrics.update(actor_metrics)
             # Update target networks
             self._state = self._update_target(self._state)
+
+        counts = self._counter.increment(steps=1)
+        metrics.update(counts)
+        self._logger.write(metrics)
 
     def get_variables(self, names):
         del names
