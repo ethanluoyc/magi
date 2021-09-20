@@ -6,7 +6,6 @@ from absl import logging
 from acme import specs
 from acme import wrappers
 from acme.agents.jax import actors as acting_lib
-from acme.agents.jax.bc import losses
 from acme.jax import networks as networks_lib
 from acme.jax import utils
 from acme.jax import variable_utils
@@ -30,7 +29,7 @@ flags.DEFINE_integer("eval_freq", int(5e3), "evaluation frequency")
 flags.DEFINE_integer("max_timesteps", int(1e6), "maximum number of steps")
 flags.DEFINE_integer("batch_size", 256, "batch size")
 flags.DEFINE_float("discount", 0.99, "discount")
-flags.DEFINE_bool("normalize", True, "normalize data")
+flags.DEFINE_bool("normalize", False, "normalize data")
 flags.DEFINE_bool("wandb", False, "whether to use W&B")
 
 
@@ -57,7 +56,12 @@ def evaluate(actor, env_name, seed, mean, std, seed_offset=100, eval_episodes=10
     d4rl_score = eval_env.get_normalized_score(avg_reward)
 
     logging.info("---------------------------------------")
-    logging.info("Evaluation over %d episodes: %.3f", eval_episodes, d4rl_score)
+    logging.info(
+        "Evaluation over %d episodes: %.3f (unormalized %.3f)",
+        eval_episodes,
+        d4rl_score,
+        avg_reward,
+    )
     logging.info("---------------------------------------")
     return d4rl_score
 
@@ -90,7 +94,7 @@ def make_actor(policy_network, variable_source, random_key):
 
 def make_network(
     environment_spec: specs.EnvironmentSpec,
-    policy_layer_sizes=(256, 256, 256),
+    policy_layer_sizes=(256, 256),
 ):
     """Make default networks used by TD3."""
     action_size = np.prod(environment_spec.actions.shape, dtype=int)
@@ -118,7 +122,7 @@ def main(_):
     # Disable TF GPU
     tf.config.set_visible_devices([], "GPU")
     if FLAGS.wandb:
-        wandb.init(project="magi", entity="ethanluoyc", name="td3_bc")
+        wandb.init(project="magi", entity="ethanluoyc", name="bc")
     logging.info("---------------------------------------")
     logging.info("Policy: %s, Env: %s, Seed: %s", FLAGS.policy, FLAGS.env, FLAGS.seed)
     logging.info("---------------------------------------")
@@ -145,14 +149,14 @@ def main(_):
     data_iterator = _wrap_iterator(data_iterator)
     random_key = jax.random.PRNGKey(FLAGS.seed)
     learner_key, actor_key = jax.random.split(random_key)
-    loss_fn = losses.logp(
+    loss_fn = bc.logp(
         lambda dist_params, actions: dist_params.log_prob(actions)
     )  # noqa
     learner = bc.BCLearner(
         policy_network,
         random_key=learner_key,
         loss_fn=loss_fn,
-        optimizer=optax.adam(3e-4),
+        optimizer=optax.adam(0.005),
         demonstrations=data_iterator,
         num_sgd_steps_per_step=1,
     )
