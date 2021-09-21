@@ -15,16 +15,19 @@ from acme.tf import variable_utils
 import d4rl  # type: ignore
 import gym
 import numpy as np
-import sonnet as snt
+import sonnet as snt  # type: ignore
+import tensorflow as tf
 import wandb
 
 from magi.agents.crr import tf_learning as learning
 from magi.examples.offline import d4rl_dataset
+from magi.utils import loggers
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("policy", "CRR(TF)", "Policy name")
 flags.DEFINE_string("env", "hopper-medium-v0", "OpenAI gym environment name")
 flags.DEFINE_integer("seed", 0, "seed")
+flags.DEFINE_integer("log_freq", 500, "log frequency")
 flags.DEFINE_integer("eval_freq", int(5e3), "evaluation frequency")
 flags.DEFINE_integer("max_timesteps", int(1e6), "maximum number of steps")
 flags.DEFINE_integer("eval_episodes", int(100), "maximum number of steps")
@@ -88,8 +91,8 @@ def make_networks(
     environment_spec: specs.EnvironmentSpec,
     policy_layer_sizes: Sequence[int] = (256, 256, 256),
     critic_layer_sizes: Sequence[int] = (512, 512, 256),
-    vmin: float = -150.0,
-    vmax: float = 150.0,
+    vmin: float = -5.0,
+    vmax: float = 5.0,
     num_atoms: int = 51,
 ):
     action_spec = environment_spec.actions
@@ -135,12 +138,14 @@ def main(_):
     # Disable TF GPU
     # tf.config.set_visible_devices([], "GPU")
     if FLAGS.wandb:
-        wandb.init(project="magi", entity="ethanluoyc", name="td3_bc")
+        wandb.init(project="magi", entity="ethanluoyc", name="CRR (TF)")
     logging.info("---------------------------------------")
     logging.info("Policy: %s, Env: %s, Seed: %s", FLAGS.policy, FLAGS.env, FLAGS.seed)
     logging.info("---------------------------------------")
 
     np.random.seed(FLAGS.seed)
+
+    tf.random.set_seed(FLAGS.seed)
     env = make_environment(FLAGS.env)
     environment_spec = specs.make_environment_spec(env)
     env.seed(FLAGS.seed)
@@ -162,6 +167,12 @@ def main(_):
         target_critic_network=target_networks["critic"],
         dataset=data_iterator,
         discount=FLAGS.discount,
+        logger=loggers.make_logger(
+            "learner",
+            log_frequency=FLAGS.log_freq,
+            use_wandb=FLAGS.wandb,
+            wandb_kwargs={"config": FLAGS},
+        ),
     )
 
     evaluator = make_actor(environment_spec.actions, agent_networks["policy"], learner)

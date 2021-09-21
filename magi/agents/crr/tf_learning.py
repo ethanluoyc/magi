@@ -1,21 +1,6 @@
 # python3
-# Copyright 2018 DeepMind Technologies Limited. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+"""Feed-forward CRR learner implementation."""
 
-"""Recurrent CRR learner implementation."""
-
-import operator
 import time
 from typing import Dict, List, Optional
 
@@ -29,7 +14,7 @@ from acme.utils import counting
 from acme.utils import loggers
 import numpy as np
 import reverb
-import sonnet as snt
+import sonnet as snt  # type: ignore
 import tensorflow as tf
 
 
@@ -313,8 +298,12 @@ class CRRLearner(core.Learner):
 
         # Maybe clip gradients.
         if self._clipping:
-            policy_gradients = tf.clip_by_global_norm(policy_gradients, 40.0)[0]
-            critic_gradients = tf.clip_by_global_norm(critic_gradients, 40.0)[0]
+            policy_gradients, policy_g_norm = tf.clip_by_global_norm(
+                policy_gradients, 40.0
+            )
+            critic_gradients, critic_g_norm = tf.clip_by_global_norm(
+                critic_gradients, 40.0
+            )
 
         # Apply gradients.
         self._critic_optimizer.apply(
@@ -342,6 +331,10 @@ class CRRLearner(core.Learner):
             "critic_loss": critic_loss,
             "policy_loss": policy_loss,
             "policy_loss_coef": policy_loss_coef,
+            "advantages": tf.reduce_mean(advantage),
+            "policy_g_norm": policy_g_norm,
+            "critic_g_norm": critic_g_norm,
+            "q": tf.reduce_mean(q_tm1_mean),
         }
 
     @tf.function
