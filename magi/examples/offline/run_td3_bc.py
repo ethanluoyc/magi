@@ -5,8 +5,6 @@ from absl import flags
 from absl import logging
 from acme import specs
 from acme import wrappers
-from acme.agents.jax import actors as acting_lib
-from acme.jax import variable_utils
 import d4rl  # type: ignore
 import gym
 import jax
@@ -14,8 +12,7 @@ import numpy as np
 import tensorflow as tf
 import wandb
 
-from magi.agents import td3
-from magi.agents.td3_bc import learning
+from magi.agents import td3_bc
 from magi.examples.offline import d4rl_dataset
 
 FLAGS = flags.FLAGS
@@ -72,24 +69,6 @@ def make_environment(name):
     return wrappers.SinglePrecisionWrapper(environment)
 
 
-def make_actor(policy_network, variable_source, random_key):
-    variable_client = variable_utils.VariableClient(variable_source, "", device="cpu")
-    variable_client.update_and_wait()
-
-    def make_policy(network):
-        def policy(params, key, obs):
-            del key
-            return network.apply(params, obs)
-
-        return policy
-
-    return acting_lib.FeedForwardActor(
-        make_policy(policy_network),
-        random_key,
-        variable_client=variable_client,
-    )
-
-
 def main(_):
     # Disable TF GPU
     tf.config.set_visible_devices([], "GPU")
@@ -105,8 +84,19 @@ def main(_):
     env.seed(FLAGS.seed)
 
     max_action = environment_spec.actions.maximum[0]
-    agent_networks = td3.make_default_networks(environment_spec.actions)
+    assert max_action == 1.0
+    agent_networks = td3_bc.make_networks(environment_spec.actions)
     data = d4rl.qlearning_dataset(env)
+    builder = td3_bc.TD3BCBuilder(
+        td3_bc.TD3BCConfig(
+            discount=FLAGS.discount,
+            tau=FLAGS.tau,
+            policy_noise=FLAGS.policy_noise * max_action,
+            noise_clip=FLAGS.noise_clip * max_action,
+            policy_update_period=FLAGS.policy_freq,
+            alpha=FLAGS.alpha,
+        )
+    )
     if FLAGS.normalize:
         data, mean, std = d4rl_dataset.normalize_obs(data)
     else:
@@ -116,21 +106,14 @@ def main(_):
     ).as_numpy_iterator()
     random_key = jax.random.PRNGKey(FLAGS.seed)
     learner_key, actor_key = jax.random.split(random_key)
-    learner = learning.TD3BCLearner(
-        environment_spec,
-        agent_networks["policy"],
-        agent_networks["critic"],
-        iterator=data_iterator,
-        random_key=learner_key,
-        discount=FLAGS.discount,
-        tau=FLAGS.tau,
-        policy_noise=FLAGS.policy_noise * max_action,
-        noise_clip=FLAGS.noise_clip * max_action,
-        policy_update_period=FLAGS.policy_freq,
-        alpha=FLAGS.alpha,
-    )
+    learner = builder.make_learner(learner_key, agent_networks, dataset=data_iterator)
 
-    evaluator = make_actor(agent_networks["policy"], learner, actor_key)
+    evaluator_network = lambda params, key, obs: agent_networks["policy"].apply(  # noqa
+        params, obs
+    )
+    evaluator = builder.make_actor(
+        actor_key, evaluator_network, variable_source=learner
+    )
     evaluations = []
     for t in range(int(FLAGS.max_timesteps)):
         learner.step()

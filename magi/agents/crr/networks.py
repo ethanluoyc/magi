@@ -1,5 +1,9 @@
-from typing import NamedTuple, Optional, Union
+from typing import Dict, NamedTuple, Optional, Sequence, Union
 
+from acme import specs
+from acme.agents.jax import actors
+from acme.jax import networks as networks_lib
+from acme.jax import utils
 import haiku as hk
 import jax
 import jax.numpy as jnp
@@ -120,3 +124,84 @@ class MultivariateNormalDiagHead(hk.Module):
             dist = tfd.MultivariateNormalDiag(loc=mean, scale_diag=scale)
 
         return dist
+
+
+def apply_policy_and_sample(
+    action_spec: specs.BoundedArray,
+    networks: Dict[str, networks_lib.FeedForwardNetwork],
+    eval_mode: bool = False,
+) -> actors.FeedForwardPolicy:
+    """Returns a function that computes actions."""
+    policy_network = networks["policy"]
+
+    def apply_and_sample(params, key, obs):
+        action_dist = policy_network.apply(params, obs)
+        action = action_dist.mean() if eval_mode else action_dist.sample(seed=key)
+        return hk.transform(lambda a: networks_lib.ClipToSpec(action_spec)(a)).apply(
+            None, None, action
+        )
+
+    return apply_and_sample
+
+
+def make_networks(
+    spec: specs.EnvironmentSpec,
+    policy_layer_sizes: Sequence[int] = (256, 256, 256),
+    critic_layer_sizes: Sequence[int] = (256, 256, 256),
+    vmin: float = -150.0,
+    vmax: float = 150.0,
+    num_atoms: int = 51,
+    init_scale=0.7,
+    min_scale=0.2,
+    fixed_scale=True,
+):
+    """Creates networks used by the CRR agent."""
+    # Get total number of action dimensions from action spec.
+    num_dimensions = int(np.prod(spec.actions.shape, dtype=int))
+
+    def _policy_fn(observations):
+        # Create the policy network.
+        policy_network = hk.Sequential(
+            [
+                networks_lib.LayerNormMLP(policy_layer_sizes, activate_final=True),
+                MultivariateNormalDiagHead(
+                    num_dimensions,
+                    tanh_mean=True,
+                    init_scale=init_scale,
+                    fixed_scale=fixed_scale,
+                    min_scale=min_scale,
+                    use_tfd_independent=False,
+                ),
+            ]
+        )
+        return policy_network(observations)
+
+    def _critic_fn(observations, actions):
+        # Create the critic network.
+        critic_network = hk.Sequential(
+            [
+                # The multiplexer concatenates the observations/actions.
+                networks_lib.CriticMultiplexer(),
+                networks_lib.LayerNormMLP(critic_layer_sizes, activate_final=True),
+                DiscreteValuedHead(vmin, vmax, num_atoms),
+            ]
+        )
+        return critic_network(observations, actions)
+
+    # Create dummy observations and actions to create network parameters.
+    dummy_action = utils.zeros_like(spec.actions)
+    dummy_obs = utils.zeros_like(spec.observations)
+    dummy_action = utils.add_batch_dim(dummy_action)
+    dummy_obs = utils.add_batch_dim(dummy_obs)
+
+    policy = hk.without_apply_rng(hk.transform(_policy_fn))
+    critic = hk.without_apply_rng(hk.transform(_critic_fn))
+
+    return {
+        "policy": networks_lib.FeedForwardNetwork(
+            lambda key: policy.init(key, dummy_obs), policy.apply
+        ),
+        "critic": networks_lib.FeedForwardNetwork(
+            lambda key: critic.init(key, dummy_obs, dummy_action), critic.apply
+        ),
+    }

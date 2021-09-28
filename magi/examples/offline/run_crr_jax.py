@@ -1,6 +1,4 @@
 """Run CRR on D4RL."""
-from typing import Sequence
-
 from absl import app
 from absl import flags
 from absl import logging
@@ -17,8 +15,7 @@ import numpy as np
 import tensorflow as tf
 import wandb
 
-from magi.agents.crr import learning
-from magi.agents.crr import networks
+from magi.agents import crr
 from magi.examples.offline import d4rl_dataset
 from magi.utils import loggers
 
@@ -88,54 +85,6 @@ def make_actor(action_spec, policy_network, variable_source, random_key):
     )
 
 
-def make_networks(
-    environment_spec: specs.EnvironmentSpec,
-    policy_layer_sizes: Sequence[int] = (256, 256, 256),
-    critic_layer_sizes: Sequence[int] = (256, 256, 256),
-    vmin: float = -150.0,
-    vmax: float = 150.0,
-    num_atoms: int = 51,
-):
-    action_spec = environment_spec.actions
-    # Get total number of action dimensions from action spec.
-    num_dimensions = int(np.prod(action_spec.shape, dtype=int))
-    # # Create the shared observation network; here simply a state-less operation.
-    # observation_network = tf2_utils.batch_concat
-
-    def policy_fn(observations):
-        # Create the policy network.
-        policy_network = hk.Sequential(
-            [
-                acme_networks.LayerNormMLP(policy_layer_sizes, activate_final=True),
-                networks.MultivariateNormalDiagHead(
-                    num_dimensions,
-                    tanh_mean=True,
-                    init_scale=0.2,
-                    fixed_scale=True,
-                    use_tfd_independent=False,
-                ),
-            ]
-        )
-        return policy_network(observations)
-
-    def critic_fn(observations, actions):
-        # Create the critic network.
-        critic_network = hk.Sequential(
-            [
-                # The multiplexer concatenates the observations/actions.
-                acme_networks.CriticMultiplexer(),
-                acme_networks.LayerNormMLP(critic_layer_sizes, activate_final=True),
-                networks.DiscreteValuedHead(vmin, vmax, num_atoms),
-            ]
-        )
-        return critic_network(observations, actions)
-
-    return {
-        "policy": hk.without_apply_rng(hk.transform(policy_fn)),
-        "critic": hk.without_apply_rng(hk.transform(critic_fn)),
-    }
-
-
 def main(_):
     # Disable TF GPU
 
@@ -150,9 +99,19 @@ def main(_):
     env = make_environment(FLAGS.env)
     environment_spec = specs.make_environment_spec(env)
     env.seed(FLAGS.seed)
-
-    agent_networks = make_networks(environment_spec)
+    config = crr.CRRConfig(discount=FLAGS.discount, batch_size=FLAGS.batch_size)
+    agent_networks = crr.make_networks(environment_spec)
     data = d4rl.qlearning_dataset(env)
+
+    def learner_logger_fn():
+        return loggers.make_logger(
+            "learner",
+            log_frequency=FLAGS.log_freq,
+            use_wandb=FLAGS.wandb,
+            wandb_kwargs={"config": FLAGS},
+        )
+
+    builder = crr.CRRBuilder(config, logger_fn=learner_logger_fn)
     if FLAGS.normalize:
         data, mean, std = d4rl_dataset.normalize_obs(data)
     else:
@@ -161,26 +120,15 @@ def main(_):
         data, batch_size=FLAGS.batch_size
     ).as_numpy_iterator()
     learner_key, actor_key = jax.random.split(jax.random.PRNGKey(FLAGS.seed))
-    learner = learning.CRRLearner(
-        environment_spec=environment_spec,
-        policy_network=agent_networks["policy"],
-        critic_network=agent_networks["critic"],
-        random_key=learner_key,
-        dataset=data_iterator,
-        discount=FLAGS.discount,
-        logger=loggers.make_logger(
-            "learner",
-            log_frequency=FLAGS.log_freq,
-            use_wandb=FLAGS.wandb,
-            wandb_kwargs={"config": FLAGS},
-        ),
-    )
 
-    evaluator = make_actor(
-        environment_spec.actions,
-        agent_networks["policy"],
-        learner,
-        actor_key,
+    learner = builder.make_learner(
+        networks=agent_networks, random_key=learner_key, dataset=data_iterator
+    )
+    evaluator_network = crr.apply_policy_and_sample(
+        environment_spec.actions, agent_networks, eval_mode=True
+    )
+    evaluator = builder.make_actor(
+        evaluator_network, actor_key, variable_source=learner
     )
     evaluations = []
     for t in range(int(FLAGS.max_timesteps)):

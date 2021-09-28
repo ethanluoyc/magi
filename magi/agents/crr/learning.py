@@ -3,7 +3,6 @@ import copy
 from typing import Dict, Iterator, List, NamedTuple, Optional, Sequence, Tuple
 
 import acme
-from acme import specs
 from acme import types
 from acme.jax import networks as networks_lib
 from acme.jax import utils as jax_utils
@@ -31,9 +30,10 @@ class TrainingState(NamedTuple):
 
 
 class CRRLearner(acme.Learner):
+    _state: TrainingState
+
     def __init__(
         self,
-        environment_spec: specs.EnvironmentSpec,
         policy_network: networks_lib.FeedForwardNetwork,
         critic_network: networks_lib.FeedForwardNetwork,
         dataset: Iterator[reverb.ReplaySample],
@@ -72,7 +72,6 @@ class CRRLearner(acme.Learner):
                 f"got {baseline_reduce_function}"
             )
         # Internalize agent parameters
-        self._environment_spec = environment_spec
         self._policy_network = policy_network
         self._critic_network = critic_network
         self._data_iterator = dataset
@@ -89,17 +88,9 @@ class CRRLearner(acme.Learner):
 
         # Initialize state
         policy_init_key, critic_init_key, random_key = jax.random.split(random_key, 3)
-        obs_spec = jax_utils.add_batch_dim(
-            jax_utils.zeros_like(environment_spec.observations)
-        )
-        action_spec = jax_utils.add_batch_dim(
-            jax_utils.zeros_like(environment_spec.actions)
-        )
-        initial_policy_params = policy_network.init(policy_init_key, obs_spec)
+        initial_policy_params = policy_network.init(policy_init_key)
         initial_policy_opt_state = self._policy_optimizer.init(initial_policy_params)
-        initial_critic_params = critic_network.init(
-            critic_init_key, obs_spec, action_spec
-        )
+        initial_critic_params = critic_network.init(critic_init_key)
         initial_critic_opt_state = self._critic_optimizer.init(initial_critic_params)
         self._state = TrainingState(
             steps=0,
@@ -285,5 +276,14 @@ class CRRLearner(acme.Learner):
         self._logger.write(metrics)
 
     def get_variables(self, names: Sequence[str]) -> List[networks_lib.Params]:
-        del names
-        return [self._state.policy_params]
+        variables = {
+            "policy": self._state.policy_params,
+            "critic": self._state.critic_params,
+        }
+        return [variables[name] for name in names]
+
+    def save(self) -> TrainingState:
+        return self._state
+
+    def restore(self, state: TrainingState):
+        self._state = state

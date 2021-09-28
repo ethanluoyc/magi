@@ -5,9 +5,7 @@ import copy
 from typing import Iterator, NamedTuple, Optional
 
 from acme import core
-from acme import specs
 from acme import types
-from acme.jax import utils
 from acme.utils import counting
 from acme.utils import loggers
 import haiku as hk
@@ -33,7 +31,6 @@ class TrainingState(NamedTuple):
 class TD3BCLearner(core.Learner):
     def __init__(
         self,
-        environment_spec: specs.EnvironmentSpec,
         policy_network: hk.Transformed,
         critic_network: hk.Transformed,
         iterator: Iterator[reverb.ReplaySample],
@@ -59,7 +56,6 @@ class TD3BCLearner(core.Learner):
         self._policy_network = policy_network
         self._critic_network = critic_network
         self._rng = hk.PRNGSequence(random_key)
-        self.max_action = environment_spec.actions.maximum[0]
         self._data_iterator = iterator
         self.discount = discount
         self.tau = tau
@@ -72,17 +68,9 @@ class TD3BCLearner(core.Learner):
         self._counter = counter or counting.Counter()
 
         def init_state():
-            dummy_obs = utils.add_batch_dim(
-                utils.zeros_like(environment_spec.observations)
-            )
-            dummy_actions = utils.add_batch_dim(
-                utils.zeros_like(environment_spec.actions)
-            )
-            policy_params = policy_network.init(next(self._rng), dummy_obs)
+            policy_params = policy_network.init(next(self._rng))
             policy_opt_state = self.policy_optimizer.init(policy_params)
-            critic_params = critic_network.init(
-                next(self._rng), dummy_obs, dummy_actions
-            )
+            critic_params = critic_network.init(next(self._rng))
             critic_opt_state = self.policy_optimizer.init(critic_params)
             return TrainingState(
                 policy_params,
@@ -157,7 +145,8 @@ class TD3BCLearner(core.Learner):
                     policy_target_params, transitions.next_observation
                 )
                 next_action = next_action + noise
-                next_action = jnp.clip(next_action, -self.max_action, self.max_action)
+                # TODO(yl) handle non-canonical action spec
+                next_action = jnp.clip(next_action, -1.0, 1.0)
 
                 # Compute the target Q value
                 q1_target, q2_target = self._critic_network.apply(
