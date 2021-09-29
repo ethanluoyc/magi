@@ -12,6 +12,7 @@ import numpy as np
 import tensorflow as tf
 import wandb
 
+from magi.agents import td3
 from magi.agents import td3_bc
 from magi.examples.offline import d4rl_dataset
 
@@ -85,7 +86,7 @@ def main(_):
 
     max_action = environment_spec.actions.maximum[0]
     assert max_action == 1.0
-    agent_networks = td3_bc.make_networks(environment_spec.actions)
+    agent_networks = td3.make_networks(environment_spec)
     data = d4rl.qlearning_dataset(env)
     builder = td3_bc.TD3BCBuilder(
         td3_bc.TD3BCConfig(
@@ -108,9 +109,7 @@ def main(_):
     learner_key, actor_key = jax.random.split(random_key)
     learner = builder.make_learner(learner_key, agent_networks, dataset=data_iterator)
 
-    evaluator_network = lambda params, key, obs: agent_networks["policy"].apply(  # noqa
-        params, obs
-    )
+    evaluator_network = td3.apply_policy_sample(agent_networks, eval_mode=True)
     evaluator = builder.make_actor(
         actor_key, evaluator_network, variable_source=learner
     )

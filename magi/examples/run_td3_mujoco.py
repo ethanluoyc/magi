@@ -8,7 +8,6 @@ from acme import specs
 from acme import wrappers
 import gym
 import jax
-import jax.numpy as jnp
 import numpy as np
 import tensorflow_probability.substrates.jax as tfp
 
@@ -43,28 +42,6 @@ def load_env(env_name: str, seed: int):
     return env
 
 
-def make_policy(
-    environment_spec: specs.EnvironmentSpec,
-    agent_networks,
-    eval_mode: bool = True,
-    sigma: float = 0.1,
-):
-    policy_network = agent_networks["policy"]
-
-    def policy(params, key, observation):
-        action_mean = policy_network.apply(params, observation)
-        if eval_mode:
-            return action_mean
-        else:
-            action = tfd.Normal(loc=action_mean, scale=sigma).sample(seed=key)
-            action = jnp.clip(
-                action, environment_spec.action.minimum, environment_spec.action.maximum
-            )
-            return action
-
-    return policy
-
-
 def main(_):
     np.random.seed(FLAGS.seed)
     env = load_env(FLAGS.env, FLAGS.seed)
@@ -72,13 +49,12 @@ def main(_):
     exp_name = f"td3_gym_{FLAGS.env}_{FLAGS.seed}_{int(time.time())}"
 
     td3_config = td3.TD3Config(min_replay_size=FLAGS.num_initial_steps)
-    agent_networks = td3.make_default_networks(environment_spec.actions)
+    agent_networks = td3.make_networks(environment_spec)
     agent = td3.TD3Agent(
         environment_spec=environment_spec,
-        policy_network=agent_networks["policy"],
-        critic_network=agent_networks["critic"],
-        random_key=jax.random.PRNGKey(FLAGS.seed),
+        networks=agent_networks,
         config=td3_config,
+        random_key=jax.random.PRNGKey(FLAGS.seed),
         logger=loggers.make_logger(
             "agent",
             use_wandb=FLAGS.wandb,
@@ -97,20 +73,15 @@ def main(_):
         agent,
         logger=loggers.make_logger(label="train_loop", use_wandb=FLAGS.wandb),
     )
-    eval_actor = agent.builder.make_actor(
+    evaluator = agent.builder.make_actor(
         random_key=jax.random.PRNGKey(FLAGS.seed + 10),
-        policy_network=make_policy(
-            environment_spec,
-            agent_networks,
-            eval_mode=True,
-            sigma=td3_config.policy_exploration_noise,
-        ),
+        policy_network=td3.apply_policy_sample(agent_networks, eval_mode=True),
         variable_source=agent,
     )
     eval_env = load_env(FLAGS.env, FLAGS.seed + 1000)
     eval_loop = acme.EnvironmentLoop(
         eval_env,
-        eval_actor,
+        evaluator,
         label="eval_loop",
         logger=loggers.make_logger(label="eval_loop", use_wandb=FLAGS.wandb),
     )

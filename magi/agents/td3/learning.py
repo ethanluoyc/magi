@@ -3,10 +3,8 @@ import copy
 from typing import Iterator, NamedTuple, Optional
 
 import acme
-from acme import specs
 from acme import types
 from acme.jax import types as jax_types
-from acme.jax import utils
 from acme.utils import counting
 from acme.utils import loggers
 import haiku as hk
@@ -27,12 +25,12 @@ class TrainingState(NamedTuple):
     critic_opt_state: hk.Params
     policy_target_params: hk.Params
     critic_target_params: hk.Params
+    key: jax_types.PRNGKey
 
 
 class TD3Learner(acme.Learner):
     def __init__(
         self,
-        environment_spec: specs.EnvironmentSpec,
         policy_network: hk.Transformed,
         critic_network: hk.Transformed,
         iterator: Iterator[reverb.ReplaySample],
@@ -57,8 +55,6 @@ class TD3Learner(acme.Learner):
         )
         self._policy_network = policy_network
         self._critic_network = critic_network
-        self._rng = hk.PRNGSequence(random_key)
-        self._action_spec: specs.BoundedArray = environment_spec.actions
         self._data_iterator = iterator
         self._discount = discount
         self._soft_update_rate = soft_update_rate
@@ -69,18 +65,11 @@ class TD3Learner(acme.Learner):
         self._logger = logger or loggers.make_default_logger("learner", save_data=False)
         self._counter = counter or counting.Counter()
 
-        def init_state():
-            dummy_obs = utils.add_batch_dim(
-                utils.zeros_like(environment_spec.observations)
-            )
-            dummy_actions = utils.add_batch_dim(
-                utils.zeros_like(environment_spec.actions)
-            )
-            policy_params = policy_network.init(next(self._rng), dummy_obs)
+        def init_state(key):
+            key1, key2, key = jax.random.split(key, 3)
+            policy_params = policy_network.init(key1)
             policy_opt_state = self._policy_optimizer.init(policy_params)
-            critic_params = critic_network.init(
-                next(self._rng), dummy_obs, dummy_actions
-            )
+            critic_params = critic_network.init(key2)
             critic_opt_state = self._policy_optimizer.init(critic_params)
             return TrainingState(
                 policy_params,
@@ -89,9 +78,10 @@ class TD3Learner(acme.Learner):
                 critic_opt_state,
                 copy.deepcopy(policy_params),
                 copy.deepcopy(critic_params),
+                key=key,
             )
 
-        self._state = init_state()
+        self._state = init_state(random_key)
 
         @jax.jit
         def _update_policy(state: TrainingState, batch: reverb.ReplaySample, key):
@@ -146,9 +136,7 @@ class TD3Learner(acme.Learner):
                     policy_target_params, transitions.next_observation
                 )
                 next_action = next_action + noise
-                next_action = jnp.clip(
-                    next_action, self._action_spec.minimum, self._action_spec.maximum
-                )
+                next_action = jnp.clip(next_action, -1.0, 1.0)
 
                 # Compute the target Q value
                 q1_target, q2_target = self._critic_network.apply(
@@ -195,37 +183,45 @@ class TD3Learner(acme.Learner):
                 ),
             )
 
-        self._update_policy = _update_policy
-        self._update_critic = _update_critic
-        self._update_target = _update_target
+        def sgd_step(state: TrainingState, batch: reverb.ReplaySample, step: int):
+            metrics = {}
+            key1, key2, key = jax.random.split(state.key, 3)
+            state, critic_metrics = _update_critic(state, batch, key1)
+            metrics.update(critic_metrics)
+
+            # Delayed policy and target network updates
+            if step % policy_target_update_period == 0:
+                state, policy_metrics = _update_policy(
+                    state,
+                    batch,
+                    key2,
+                )
+                metrics.update(policy_metrics)
+                # Update target networks
+                state = _update_target(state)
+            state = state._replace(key=key)
+            return state, metrics
+
+        self._sgd_step = sgd_step
 
     def step(self):
-
         # Sample replay buffer
         batch = next(self._data_iterator)
 
-        metrics = {}
-        self._state, critic_metrics = self._update_critic(
-            self._state, batch, next(self._rng)
-        )
-        metrics.update(critic_metrics)
-
-        # Delayed policy and target network updates
-        if self._learning_steps % self._policy_target_update_period == 0:
-            self._state, policy_metrics = self._update_policy(
-                self._state,
-                batch,
-                next(self._rng),
-            )
-            metrics.update(policy_metrics)
-            # Update target networks
-            self._state = self._update_target(self._state)
-        counts = self._counter.increment(steps=1)
-        metrics.update(counts)
-
+        self._state, metrics = self._sgd_step(self._state, batch, self._learning_steps)
         self._learning_steps += 1
-        self._logger.write(metrics)
+        counts = self._counter.increment(steps=1)
+        self._logger.write({**counts, **metrics})
 
     def get_variables(self, names):
-        del names
-        return [self._state.policy_params]
+        variables = {
+            "policy": self._state.policy_params,
+            "critic": self._state.critic_params,
+        }
+        return [variables[name] for name in names]
+
+    def restore(self, state):
+        self._state = state
+
+    def save(self):
+        return self._state
