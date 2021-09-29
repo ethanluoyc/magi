@@ -4,12 +4,8 @@ from absl import flags
 from absl import logging
 from acme import specs
 from acme import wrappers
-from acme.agents.jax import actors as acting
-from acme.jax import networks as acme_networks
-from acme.jax import variable_utils
 import d4rl  # type: ignore
 import gym
-import haiku as hk
 import jax
 import numpy as np
 import tensorflow as tf
@@ -67,24 +63,6 @@ def make_environment(name):
     return wrappers.SinglePrecisionWrapper(environment)
 
 
-def make_actor(action_spec, policy_network, variable_source, random_key):
-    variable_client = variable_utils.VariableClient(
-        client=variable_source,
-        key="policy",
-    )
-    variable_client.update_and_wait()
-
-    def behavior_policy(params, key, obs):
-        del key
-        action_dist = policy_network.apply(params, obs)
-        clip_fn = hk.transform(lambda a: acme_networks.ClipToSpec(action_spec)(a))
-        return clip_fn.apply(None, None, action_dist.mean())
-
-    return acting.FeedForwardActor(
-        behavior_policy, random_key, variable_client=variable_client
-    )
-
-
 def main(_):
     # Disable TF GPU
 
@@ -124,9 +102,7 @@ def main(_):
     learner = builder.make_learner(
         networks=agent_networks, random_key=learner_key, dataset=data_iterator
     )
-    evaluator_network = crr.apply_policy_and_sample(
-        environment_spec.actions, agent_networks, eval_mode=True
-    )
+    evaluator_network = crr.apply_policy_and_sample(agent_networks, eval_mode=True)
     evaluator = builder.make_actor(
         evaluator_network, actor_key, variable_source=learner
     )

@@ -127,7 +127,6 @@ class MultivariateNormalDiagHead(hk.Module):
 
 
 def apply_policy_and_sample(
-    action_spec: specs.BoundedArray,
     networks: Dict[str, networks_lib.FeedForwardNetwork],
     eval_mode: bool = False,
 ) -> actors.FeedForwardPolicy:
@@ -136,10 +135,8 @@ def apply_policy_and_sample(
 
     def apply_and_sample(params, key, obs):
         action_dist = policy_network.apply(params, obs)
-        action = action_dist.mean() if eval_mode else action_dist.sample(seed=key)
-        return hk.transform(lambda a: networks_lib.ClipToSpec(action_spec)(a)).apply(
-            None, None, action
-        )
+        action = action_dist.mode() if eval_mode else action_dist.sample(seed=key)
+        return action
 
     return apply_and_sample
 
@@ -151,9 +148,6 @@ def make_networks(
     vmin: float = -150.0,
     vmax: float = 150.0,
     num_atoms: int = 51,
-    init_scale=0.7,
-    min_scale=0.2,
-    fixed_scale=True,
 ):
     """Creates networks used by the CRR agent."""
     # Get total number of action dimensions from action spec.
@@ -164,14 +158,7 @@ def make_networks(
         policy_network = hk.Sequential(
             [
                 networks_lib.LayerNormMLP(policy_layer_sizes, activate_final=True),
-                MultivariateNormalDiagHead(
-                    num_dimensions,
-                    tanh_mean=True,
-                    init_scale=init_scale,
-                    fixed_scale=fixed_scale,
-                    min_scale=min_scale,
-                    use_tfd_independent=False,
-                ),
+                networks_lib.NormalTanhDistribution(num_dimensions),
             ]
         )
         return policy_network(observations)
