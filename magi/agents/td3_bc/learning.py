@@ -216,5 +216,5 @@ class TD3BCLearner(acme.Learner):
     def save(self) -> TrainingState:
         return self._state
 
-    def load(self, state: TrainingState) -> None:
+    def restore(self, state: TrainingState) -> None:
         self._state = state
