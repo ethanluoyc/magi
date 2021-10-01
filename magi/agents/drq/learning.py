@@ -1,14 +1,11 @@
 """Learner component for DrQ."""
-import dataclasses
 from functools import partial
 import time
-from typing import NamedTuple, Optional
+from typing import Iterator, NamedTuple, Optional
 
 from acme import core
-from acme import specs
 from acme import types as acme_types
-from acme.adders import reverb as adders
-from acme.jax import utils
+from acme.jax import types as jax_types
 from acme.utils import counting
 from acme.utils import loggers
 import chex
@@ -18,12 +15,11 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import reverb
-from reverb.replay_sample import ReplaySample
 
+from magi.agents.drq import augmentations
 from magi.agents.drq import types
-from magi.agents.drq.augmentations import batched_random_crop
 
-batched_random_crop = jax.jit(batched_random_crop)
+batched_random_crop = jax.jit(augmentations.batched_random_crop)
 
 
 def soft_update(
@@ -47,9 +43,8 @@ def make_critic_loss_fn(encoder_apply, actor_apply, critic_apply, gamma):
         params_critic_target: hk.Params,
         params_actor: hk.Params,
         log_alpha: jnp.ndarray,
-        batch: reverb.ReplaySample,
+        data: acme_types.Transition,
     ):
-        data: acme_types.Transition = batch.data
         next_encoded = jax.lax.stop_gradient(
             encoder_apply(params_critic["encoder"], data.next_observation)
         )
@@ -94,9 +89,8 @@ def make_actor_loss_fn(encoder_apply, actor_apply, critic_apply):
         key,
         params_critic: hk.Params,
         log_alpha: jnp.ndarray,
-        batch: reverb.ReplaySample,
+        data: acme_types.Transition,
     ):
-        data: acme_types.Transition = batch.data
         encoded = encoder_apply(params_critic["encoder"], data.observation)
         action_dist = actor_apply(params_actor, encoded)
         if hasattr(action_dist, "sample_and_log_prob"):
@@ -121,38 +115,6 @@ def _loss_alpha(log_alpha: jnp.ndarray, entropy, target_entropy) -> jnp.ndarray:
     return temperature * (entropy - target_entropy), {"alpha": temperature}
 
 
-@dataclasses.dataclass
-class DrQConfig:
-    """Configuration parameters for SAC-AE.
-
-    Notes:
-      These parameters are taken from [1].
-      Note that hyper-parameters such as log-stddev bounds on the policy should
-      be configured in the network builder.
-    """
-
-    min_replay_size: int = 1
-    max_replay_size: int = 1_000_000
-    replay_table_name: str = adders.DEFAULT_PRIORITY_TABLE
-
-    discount: float = 0.99
-    batch_size: int = 128
-    initial_num_steps: int = 1000
-
-    critic_learning_rate: float = 3e-4
-    critic_target_update_frequency: int = 1
-    critic_q_soft_update_rate: float = 0.005
-
-    actor_learning_rate: float = 3e-4
-    actor_update_frequency: int = 1
-
-    temperature_learning_rate: float = 3e-4
-    temperature_adam_b1: float = 0.5
-    init_temperature: float = 0.1
-
-    augmentation: types.DataAugmentation = batched_random_crop
-
-
 class TrainingState(NamedTuple):
     """Holds training state for the DrQ learner."""
 
@@ -167,6 +129,7 @@ class TrainingState(NamedTuple):
 
     log_alpha: jnp.ndarray
     alpha_opt_state: jnp.ndarray
+    key: jax_types.PRNGKey
 
     @property
     def encoder_critic_params(self):
@@ -187,17 +150,18 @@ class TrainingState(NamedTuple):
         )
 
 
-class DrQLearner(core.Learner, core.VariableSource):
+class DrQLearner(core.Learner):
     """Learner for Data-regularized Q"""
 
     def __init__(
         self,
-        environment_spec: specs.EnvironmentSpec,
-        dataset_iterator,
         random_key: jnp.ndarray,
+        dataset: Iterator[reverb.ReplaySample],
         encoder_network: hk.Transformed,
         policy_network: hk.Transformed,
         critic_network: hk.Transformed,
+        target_entropy: float,
+        augmentation: Optional[types.DataAugmentation] = None,
         policy_optimizer: Optional[optax.GradientTransformation] = None,
         critic_optimizer: Optional[optax.GradientTransformation] = None,
         temperature_optimizer: Optional[optax.GradientTransformation] = None,
@@ -206,19 +170,18 @@ class DrQLearner(core.Learner, core.VariableSource):
         critic_target_update_frequency: int = 1,
         critic_soft_update_rate: float = 0.005,
         discount: float = 0.99,
-        augmentation=batched_random_crop,
         counter: Optional[counting.Counter] = None,
         logger: Optional[loggers.Logger] = None,
     ):
-        self._iterator = dataset_iterator
+        self._iterator = dataset
 
-        self._rng = hk.PRNGSequence(random_key)
         self._num_learning_steps = 0
         # Other parameters.
         self._actor_update_frequency = actor_update_frequency
         self._critic_target_update_frequency = critic_target_update_frequency
-        self._target_entropy = -float(np.prod(environment_spec.actions.shape))
-        self._augmentation = augmentation
+        self._target_entropy = target_entropy
+        self._augmentation = augmentation or batched_random_crop
+        self._augmentation = jax.jit(augmentation)
         self._counter = counter if counter is not None else counting.Counter()
         self._logger = (
             logger
@@ -226,52 +189,49 @@ class DrQLearner(core.Learner, core.VariableSource):
             else loggers.make_default_logger(label="learner", save_data=False)
         )
 
-        example_obs = utils.add_batch_dim(
-            utils.zeros_like(environment_spec.observations)
-        )
-        example_action = utils.add_batch_dim(utils.zeros_like(environment_spec.actions))
         # Setup parameters and pure functions
         # Encoder.
         self._encoder = encoder_network
         self._critic = critic_network
         self._actor = policy_network
-
-        encoder_params = self._encoder.init(next(self._rng), example_obs)
-        example_encoded = self._encoder.apply(encoder_params, example_obs)
-        # Critic from latent to Q values
-        critic_params = self._critic.init(
-            next(self._rng), example_encoded, example_action
-        )
-        encoder_target_params = jax.tree_map(lambda x: x.copy(), encoder_params)
-        critic_target_params = jax.tree_map(lambda x: x.copy(), critic_params)
-
-        # Actor.
-        actor_params = self._actor.init(next(self._rng), example_encoded)
-
-        # Entropy coefficient.
-        log_alpha = jnp.array(np.log(init_temperature), dtype=jnp.float32)
         self._opt_actor = policy_optimizer or optax.adam(1e-4)
         self._opt_alpha = temperature_optimizer or optax.adam(1e-4)
         self._opt_critic = critic_optimizer or optax.adam(1e-4)
 
-        actor_opt_state = self._opt_actor.init(actor_params)
-        encoder_critic_opt_state = self._opt_critic.init(
+        # Initialize training state
+        key1, key2, key3, key = jax.random.split(random_key, 4)
+        encoder_init_params = self._encoder.init(key1)
+        critic_init_params = self._critic.init(key2)
+        encoder_init_target_params = jax.tree_map(
+            lambda x: x.copy(), encoder_init_params
+        )
+        critic_init_target_params = jax.tree_map(lambda x: x.copy(), critic_init_params)
+
+        # Actor.
+        actor_init_params = self._actor.init(key3)
+
+        # Entropy coefficient.
+        init_log_alpha = jnp.array(np.log(init_temperature), dtype=jnp.float32)
+
+        actor_init_opt_state = self._opt_actor.init(actor_init_params)
+        encoder_init_critic_opt_state = self._opt_critic.init(
             hk.data_structures.to_immutable_dict(
-                {"encoder": encoder_params, "critic": critic_params}
+                {"encoder": encoder_init_params, "critic": critic_init_params}
             )
         )
-        alpha_opt_state = self._opt_alpha.init(log_alpha)
+        alpha_init_opt_state = self._opt_alpha.init(init_log_alpha)
 
         self._state: TrainingState = TrainingState(
-            actor_params=actor_params,
-            actor_opt_state=actor_opt_state,
-            encoder_params=encoder_params,
-            encoder_target_params=encoder_target_params,
-            critic_params=critic_params,
-            critic_target_params=critic_target_params,
-            encoder_critic_opt_state=encoder_critic_opt_state,
-            log_alpha=log_alpha,
-            alpha_opt_state=alpha_opt_state,
+            actor_params=actor_init_params,
+            actor_opt_state=actor_init_opt_state,
+            encoder_params=encoder_init_params,
+            encoder_target_params=encoder_init_target_params,
+            critic_params=critic_init_params,
+            critic_target_params=critic_init_target_params,
+            encoder_critic_opt_state=encoder_init_critic_opt_state,
+            log_alpha=init_log_alpha,
+            alpha_opt_state=alpha_init_opt_state,
+            key=key,
         )
 
         # Setup losses
@@ -284,7 +244,9 @@ class DrQLearner(core.Learner, core.VariableSource):
         alpha_loss_fn = partial(_loss_alpha, target_entropy=self._target_entropy)
 
         @jax.jit
-        def _update_critic(state: TrainingState, key, batch):
+        def _update_critic(
+            state: TrainingState, key, transitions: acme_types.Transition
+        ):
             loss_grad_fn = jax.value_and_grad(critic_loss_fn, has_aux=True)
             (loss, aux), grad = loss_grad_fn(
                 state.encoder_critic_params,
@@ -292,7 +254,7 @@ class DrQLearner(core.Learner, core.VariableSource):
                 state.encoder_critic_target_params,
                 state.actor_params,
                 state.log_alpha,
-                batch,
+                transitions,
             )
             update, new_opt_state = self._opt_critic.update(
                 grad, state.encoder_critic_opt_state
@@ -309,14 +271,16 @@ class DrQLearner(core.Learner, core.VariableSource):
             )
 
         @jax.jit
-        def _update_actor(state: TrainingState, key, batch: reverb.ReplaySample):
+        def _update_actor(
+            state: TrainingState, key, transitions: acme_types.Transition
+        ):
             loss_grad_fn = jax.value_and_grad(actor_loss_fn, has_aux=True)
             (loss, aux), grad = loss_grad_fn(
                 state.actor_params,
                 key,
                 state.encoder_critic_params,
                 state.log_alpha,
-                batch,
+                transitions,
             )
             update, new_opt_state = self._opt_actor.update(grad, state.actor_opt_state)
             new_params = optax.apply_updates(state.actor_params, update)
@@ -327,7 +291,7 @@ class DrQLearner(core.Learner, core.VariableSource):
             )
 
         @jax.jit
-        def _update_alpha(state: TrainingState, entropy):
+        def _update_alpha(state: TrainingState, entropy: jnp.ndarray):
             loss_grad_fn = jax.value_and_grad(alpha_loss_fn, has_aux=True)
             (loss, aux), grad = loss_grad_fn(state.log_alpha, entropy)
             update, new_opt_state = self._opt_alpha.update(grad, state.alpha_opt_state)
@@ -350,56 +314,75 @@ class DrQLearner(core.Learner, core.VariableSource):
                 ),
             )
 
-        self._update_critic = _update_critic
-        self._update_actor = _update_actor
-        self._update_alpha = _update_alpha
-        self._update_target = _update_target
+        def sgd_step(
+            state: TrainingState,
+            transitions: acme_types.Transition,
+            step: int,
+        ):
+            key1, key2, key3, key4, key = jax.random.split(state.key, 5)
+            # Perform data augmentation on o_tm1 and o_t
+            observation = self._augmentation(key1, transitions.observation)
+            next_observation = self._augmentation(key2, transitions.next_observation)
+            transitions = transitions._replace(
+                observation=observation,
+                next_observation=next_observation,
+            )
+
+            state, loss, critic_metrics = _update_critic(state, key3, transitions)
+            metrics = {"critic_loss": loss, **critic_metrics}
+
+            # Update actor and alpha.
+            if step % actor_update_frequency == 0:
+                state, actor_loss, actor_stats = _update_actor(state, key4, transitions)
+                state, alpha_loss, alpha_stats = _update_alpha(
+                    state, actor_stats["entropy"]
+                )
+                metrics["alpha_loss"] = alpha_loss
+                metrics["actor_loss"] = actor_loss
+                metrics["entropy"] = actor_stats["entropy"]
+                metrics["alpha"] = alpha_stats["alpha"]
+
+            # Update target network.
+            if step % critic_target_update_frequency == 0:
+                state = _update_target(state)
+
+            state = state._replace(key=key)
+            return state, metrics
+
+        self._timestamp = None
+        self._sgd_step = sgd_step
 
     def step(self):
-        batch: reverb.ReplaySample = next(self._iterator)
-        start = time.time()
-        transitions = batch.data
-        observation = self._augmentation(next(self._rng), transitions.observation)
-        next_observation = self._augmentation(
-            next(self._rng), transitions.next_observation
-        )
-        batch = ReplaySample(
-            batch.info,
-            transitions._replace(
-                observation=observation, next_observation=next_observation
-            ),
+        # Get the next batch from the replay iterator
+        sample = next(self._iterator)
+        transitions: acme_types.Transition = sample.data
+
+        # Perform a single learner step
+        self._state, metrics = self._sgd_step(
+            self._state, transitions, self._num_learning_steps
         )
 
-        state = self._state
-        state, loss, critic_metrics = self._update_critic(state, next(self._rng), batch)
-        metrics = {"critic_loss": loss, **critic_metrics}
-
-        # Update actor and alpha.
-        if self._num_learning_steps % self._actor_update_frequency == 0:
-            state, actor_loss, actor_stats = self._update_actor(
-                state, next(self._rng), batch
-            )
-            state, alpha_loss, alpha_stats = self._update_alpha(
-                state, actor_stats["entropy"]
-            )
-            metrics["alpha_loss"] = alpha_loss
-            metrics["actor_loss"] = actor_loss
-            metrics["entropy"] = actor_stats["entropy"]
-            metrics["alpha"] = alpha_stats["alpha"]
-
-        # Update target network.
-        if self._num_learning_steps % self._critic_target_update_frequency == 0:
-            state = self._update_target(state)
-        self._state = state
-
+        # Compute elapsed time
+        timestamp = time.time()
+        elapsed_time = timestamp - self._timestamp if self._timestamp else 0
+        self._timestamp = timestamp
         self._num_learning_steps += 1
-        metrics = utils.to_numpy(metrics)
-        counts = self._counter.increment(steps=1, time_elapsed=time.time() - start)
-
-        self._logger.write({**counts, **metrics})
+        # Increment counts and record the current time
+        counts = self._counter.increment(steps=1, walltime=elapsed_time)
+        # Attempts to write the logs.
+        self._logger.write({**metrics, **counts})
 
     def get_variables(self, names):
-        del names
-        return [
-            {"encoder": self._state.encoder_params, "actor": self._state.actor_params}
-        ]
+        variables = {
+            "policy": {
+                "encoder": self._state.encoder_params,
+                "actor": self._state.actor_params,
+            },
+        }
+        return [variables[name] for name in names]
+
+    def save(self):
+        return self._state
+
+    def restore(self, state):
+        self._state = state

@@ -7,11 +7,12 @@ from acme import specs
 from acme import wrappers
 from dm_control import suite  # pytype: disable=import-error
 from dm_control.suite.wrappers import pixels  # pytype: disable=import-error
+import jax
 import numpy as np
+import tensorflow as tf
 
 from magi.agents import drq
-from magi.agents.drq import networks
-from magi.agents.drq.agent import DrQConfig
+from magi.agents import sac
 from magi.utils import loggers
 from magi.utils.wrappers import FrameStackingWrapper
 from magi.utils.wrappers import TakeKeyWrapper
@@ -28,7 +29,8 @@ flags.DEFINE_integer("eval_freq", 5000, "")
 flags.DEFINE_integer("eval_episodes", 10, "")
 flags.DEFINE_integer("frame_stack", 3, "")
 flags.DEFINE_integer("action_repeat", None, "")
-flags.DEFINE_integer("max_replay_size", 100_000, "Minimum replay size")
+flags.DEFINE_integer("max_replay_size", 100_000, "Maximum replay size")
+flags.DEFINE_integer("min_replay_size", 1000, "Minimum replay size")
 flags.DEFINE_integer("batch_size", 128, "Batch size")
 flags.DEFINE_integer("seed", 42, "Random seed.")
 
@@ -98,13 +100,14 @@ def main(_):
         action_repeat,
     )
     spec = specs.make_environment_spec(env)
-    network_spec = networks.make_default_networks(spec)
-
+    agent_networks = drq.make_networks(spec)
     agent = drq.DrQAgent(
         environment_spec=spec,
-        networks=network_spec,
-        config=DrQConfig(
+        networks=agent_networks,
+        config=drq.DrQConfig(
+            target_entropy=sac.target_entropy_from_env_spec(spec),
             max_replay_size=FLAGS.max_replay_size,
+            min_replay_size=FLAGS.min_replay_size,
             batch_size=FLAGS.batch_size,
             temperature_adam_b1=0.9,
         ),
@@ -113,21 +116,26 @@ def main(_):
             label="learner", log_frequency=1000, use_wandb=FLAGS.wandb
         ),
     )
-    eval_actor = agent.make_actor(is_eval=True)
+    evaluator_network = drq.apply_policy_sample(agent_networks, eval_mode=True)
+    evaluator = agent.builder.make_actor(
+        jax.random.PRNGKey(FLAGS.seed + 10),
+        evaluator_network,
+        variable_source=agent,
+    )
 
-    loop = acme.EnvironmentLoop(
+    train_loop = acme.EnvironmentLoop(
         env,
         agent,
-        logger=loggers.make_logger(label="environment_loop", use_wandb=FLAGS.wandb),
+        logger=loggers.make_logger(label="train_loop", use_wandb=FLAGS.wandb),
     )
     eval_loop = acme.EnvironmentLoop(
         test_env,
-        eval_actor,
-        logger=loggers.make_logger(label="eval", use_wandb=FLAGS.wandb),
+        evaluator,
+        logger=loggers.make_logger(label="eval_loop", use_wandb=FLAGS.wandb),
     )
     for _ in range(FLAGS.num_steps // FLAGS.eval_freq):
-        loop.run(num_steps=FLAGS.eval_freq)
-        eval_actor.update(wait=True)
+        train_loop.run(num_steps=FLAGS.eval_freq)
+        evaluator.update(wait=True)
         eval_loop.run(num_episodes=FLAGS.eval_episodes)
 
     if FLAGS.wandb:
@@ -135,4 +143,5 @@ def main(_):
 
 
 if __name__ == "__main__":
+    tf.config.set_visible_devices([], "GPU")
     app.run(main)

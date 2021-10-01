@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
+from acme import specs
+from acme.jax import networks as networks_lib
+from acme.jax import utils
 import haiku as hk
 import jax
 import jax.numpy as jnp
@@ -134,8 +137,17 @@ class DoubleCritic(hk.Module):
         return critic1(h, action), critic2(h, action)
 
 
-def make_default_networks(
-    environment_spec,
+def apply_policy_sample(networks, eval_mode: bool):
+    def policy_network(params, key, observation):
+        feature_map = networks["encoder"].apply(params["encoder"], observation)
+        action_dist = networks["actor"].apply(params["actor"], feature_map)
+        return action_dist.mode() if eval_mode else action_dist.sample(seed=key)
+
+    return policy_network
+
+
+def make_networks(
+    spec: specs.EnvironmentSpec,
     critic_hidden_sizes: Sequence[int] = (256, 256),
     actor_hidden_sizes: Sequence[int] = (256, 256),
     latent_size: int = 50,
@@ -144,27 +156,45 @@ def make_default_networks(
     num_filters: int = 32,
     num_layers: int = 4,
 ):
-    def critic(x, a):
+    def _critic(x, a):
         return DoubleCritic(
             latent_size=latent_size,
             hidden_sizes=critic_hidden_sizes,
         )(x, a)
 
-    def actor(x):
+    def _policy(x):
         return Actor(
-            action_size=environment_spec.actions.shape[0],
+            action_size=spec.actions.shape[0],
             latent_size=latent_size,
             hidden_sizes=actor_hidden_sizes,
             log_std_min=log_std_min,
             log_std_max=log_std_max,
         )(x)
 
-    def encoder(x):
+    def _encoder(x):
         return Encoder(num_filters=num_filters, num_layers=num_layers)(x)
 
+    policy = hk.without_apply_rng(hk.transform(_policy, apply_rng=True))
+    critic = hk.without_apply_rng(hk.transform(_critic, apply_rng=True))
+    encoder = hk.without_apply_rng(hk.transform(_encoder, apply_rng=True))
+
+    dummy_action = utils.zeros_like(spec.actions)
+    dummy_obs = utils.zeros_like(spec.observations)
+    dummy_action = utils.add_batch_dim(dummy_action)
+    dummy_obs = utils.add_batch_dim(dummy_obs)
+    dummy_encoded = hk.testing.transform_and_run(
+        _encoder, seed=0, jax_transform=jax.jit
+    )(dummy_obs)
+    dummy_encoded = jnp.zeros(dummy_encoded.shape, dummy_encoded.dtype)
     # Encoder.
     return {
-        "encoder": encoder,
-        "critic": critic,
-        "actor": actor,
+        "encoder": networks_lib.FeedForwardNetwork(
+            lambda key: encoder.init(key, dummy_obs), encoder.apply
+        ),
+        "actor": networks_lib.FeedForwardNetwork(
+            lambda key: policy.init(key, dummy_encoded), policy.apply
+        ),
+        "critic": networks_lib.FeedForwardNetwork(
+            lambda key: critic.init(key, dummy_encoded, dummy_action), critic.apply
+        ),
     }

@@ -4,13 +4,12 @@ import acme
 from acme import specs
 from acme.utils import loggers
 
-from magi.agents.drq import networks
-from magi.agents.drq.agent import DrQAgent
-from magi.agents.drq.agent import DrQConfig
+from magi.agents import drq
+from magi.agents import sac
 from magi.utils import fakes
 
 
-class SACTest(absltest.TestCase):
+class DrQTest(absltest.TestCase):
     def test_drq(self):
         # Create a fake environment to test with.
         environment = fakes.ContinuousVisualEnvironment(
@@ -18,7 +17,7 @@ class SACTest(absltest.TestCase):
         )
         spec = specs.make_environment_spec(environment)
         # Construct the agent.
-        network_spec = networks.make_default_networks(
+        agent_networks = drq.make_networks(
             spec,
             critic_hidden_sizes=(10, 10),
             actor_hidden_sizes=(10, 10),
@@ -26,11 +25,15 @@ class SACTest(absltest.TestCase):
             num_layers=1,
             num_filters=2,
         )
-        agent = DrQAgent(
+        agent = drq.DrQAgent(
             environment_spec=spec,
-            networks=network_spec,
+            networks=agent_networks,
             seed=0,
-            config=DrQConfig(initial_num_steps=10, batch_size=2),
+            config=drq.DrQConfig(
+                batch_size=2,
+                target_entropy=sac.target_entropy_from_env_spec(spec),
+                min_replay_size=10,
+            ),
         )
 
         loop = acme.EnvironmentLoop(
