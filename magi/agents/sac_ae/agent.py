@@ -8,6 +8,8 @@ from acme import datasets
 from acme import specs
 from acme import types
 from acme.adders import reverb as adders
+from acme.agents.jax import actor_core
+from acme.agents.jax import actors as acme_actors
 from acme.jax import utils
 from acme.jax import variable_utils
 from acme.utils import counting
@@ -22,8 +24,16 @@ import reverb
 from reverb import rate_limiters
 
 from magi.agents import actors
-from magi.agents.sac import acting
 from magi.agents.sac import losses
+
+
+def apply_policy_sample(encoder_network, actor_network, eval_mode: bool):
+    def forward_fn(params, key, observation):
+        feature_map = encoder_network.apply(params["encoder"], observation)
+        action_dist = actor_network.apply(params["actor"], feature_map)
+        return action_dist.mode() if eval_mode else action_dist.sample(seed=key)
+
+    return forward_fn
 
 
 @jax.jit
@@ -408,23 +418,18 @@ class SACAEAgent(core.Actor, core.VariableSource):
         )
 
         # Setup actors
-        self._client = variable_utils.VariableClient(self, "")
+        self._client = variable_utils.VariableClient(self, "policy")
         # The adder is used to insert observations into replay.
         # discount is 1.0 as we are multiplying gamma during learner step
         adder = adders.NStepTransitionAdder(
             client=reverb.Client(address), n_step=1, discount=1.0
         )
 
-        def forward_fn(params, observation):
-            feature_map = self._encoder.apply(params["encoder"], observation)
-            return self._actor.apply(params["actor"], feature_map)
-
-        self._forward_fn = forward_fn
-
-        self._policy_actor = acting.SACActor(
-            self._forward_fn,
-            next(self._rng),
-            is_eval=False,
+        self._policy_actor = acme_actors.GenericActor(
+            actor_core.batched_feed_forward_to_actor_core(
+                apply_policy_sample(self._encoder, self._actor, eval_mode=False)
+            ),
+            random_key=next(self._rng),
             variable_client=self._client,
             adder=adder,
         )
@@ -563,11 +568,3 @@ class SACAEAgent(core.Actor, core.VariableSource):
     def get_variables(self, names):
         del names
         return [{"encoder": self._encoder_params, "actor": self._actor_params}]
-
-    def make_actor(self, is_eval=True):
-        return acting.SACActor(
-            self._forward_fn,
-            next(self._rng),
-            is_eval=is_eval,
-            variable_client=self._client,
-        )

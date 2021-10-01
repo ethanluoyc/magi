@@ -10,7 +10,7 @@ from magi.agents.sac_ae.agent import SACAEConfig
 from magi.utils import fakes
 
 
-class SACTest(absltest.TestCase):
+class SACAETest(absltest.TestCase):
     def test_sac_ae(self):
         # Create a fake environment to test with.
         environment = fakes.ContinuousVisualEnvironment(
