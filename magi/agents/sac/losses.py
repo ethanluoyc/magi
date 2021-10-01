@@ -3,7 +3,6 @@ from acme import types
 import haiku as hk
 import jax
 import jax.numpy as jnp
-import reverb
 
 
 def alpha_loss_fn(
@@ -42,11 +41,11 @@ def critic_loss_fn(
     critic_target_params: hk.Params,
     actor_params: hk.Params,
     log_alpha: jnp.ndarray,
-    batch: reverb.ReplaySample,
+    transitions: types.Transition,
     gamma: float,
 ):
     "Compute the soft critic loss in SAC."
-    data: types.Transition = batch.data
+    data = transitions
     next_action_dist = actor.apply(actor_params, data.next_observation)
     next_actions = next_action_dist.sample(seed=key)
     next_log_probs = next_action_dist.log_prob(next_actions)

@@ -7,11 +7,9 @@ import acme
 from acme import specs
 from acme import wrappers
 import gym
-import haiku as hk
 import numpy as np
 
-from magi.agents.sac import networks
-from magi.agents.sac.agent import SACAgent
+from magi.agents import sac
 from magi.utils import loggers
 
 FLAGS = flags.FLAGS
@@ -42,22 +40,15 @@ def main(_):
     env = load_env(FLAGS.env, FLAGS.seed)
     spec = specs.make_environment_spec(env)
 
-    def critic_fn(obs, a):
-        return networks.DoubleCritic(hidden_units=(256, 256))(obs, a)
-
-    def policy_fn(obs):
-        return networks.GaussianPolicy(
-            action_size=spec.actions.shape[0], hidden_units=(256, 256)
-        )(obs)
-
-    policy = hk.without_apply_rng(hk.transform(policy_fn, apply_rng=True))
-    critic = hk.without_apply_rng(hk.transform(critic_fn, apply_rng=True))
-    exp_name = f"sac_gym_{FLAGS.env}_{FLAGS.seed}_{int(time.time())}"
-    algo = SACAgent(
+    agent_networks = sac.make_networks(spec)
+    exp_name = (
+        f"sac-{FLAGS.domain_name}_{FLAGS.task_name}_{FLAGS.seed}_{int(time.time())}"
+    )
+    agent = sac.SACAgent(
         environment_spec=spec,
-        policy=policy,
-        critic=critic,
+        networks=agent_networks,
         seed=FLAGS.seed,
+        config=sac.SACConfig(),
         logger=loggers.make_logger(
             "agent",
             use_wandb=FLAGS.wandb,
@@ -73,7 +64,7 @@ def main(_):
 
     loop = acme.EnvironmentLoop(
         env,
-        algo,
+        agent,
         logger=loggers.make_logger(label="environment_loop", use_wandb=FLAGS.wandb),
     )
     loop.run(num_steps=FLAGS.num_steps)

@@ -7,12 +7,12 @@ import acme
 from acme import specs
 from acme import wrappers
 from dm_control import suite  # pytype: disable=import-error
-import haiku as hk
 import numpy as np
+import tensorflow as tf
 
-from magi.agents.sac import networks
-from magi.agents.sac.agent import SACAgent
+from magi.agents import sac
 from magi.utils import loggers
+from magi.utils import wrappers as magi_wrappers
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("domain_name", "cartpole", "dm_control domain")
@@ -32,6 +32,7 @@ def load_env(domain_name, task_name, seed):
         task_kwargs={"random": seed},
     )
     env = wrappers.CanonicalSpecWrapper(env)
+    env = magi_wrappers.TakeKeyWrapper(env, "observations")
     env = wrappers.SinglePrecisionWrapper(env)
     return env
 
@@ -40,28 +41,15 @@ def main(_):
     np.random.seed(FLAGS.seed)
     env = load_env(FLAGS.domain_name, FLAGS.task_name, FLAGS.seed)
     spec = specs.make_environment_spec(env)
-
-    def critic_fn(s, a):
-        return networks.DoubleCritic(
-            hidden_units=(256, 256),
-        )(s["observations"], a)
-
-    def policy_fn(s):
-        return networks.GaussianPolicy(
-            action_size=spec.actions.shape[0],
-            hidden_units=(256, 256),
-        )(s["observations"])
-
-    policy = hk.without_apply_rng(hk.transform(policy_fn, apply_rng=True))
-    critic = hk.without_apply_rng(hk.transform(critic_fn, apply_rng=True))
     exp_name = (
         f"sac-{FLAGS.domain_name}_{FLAGS.task_name}_{FLAGS.seed}_{int(time.time())}"
     )
-    algo = SACAgent(
+    agent_networks = sac.make_networks(spec)
+    algo = sac.SACAgent(
         environment_spec=spec,
-        policy=policy,
-        critic=critic,
+        networks=agent_networks,
         seed=FLAGS.seed,
+        config=sac.SACConfig(),
         logger=loggers.make_logger(
             "agent",
             use_wandb=FLAGS.wandb,
@@ -84,4 +72,5 @@ def main(_):
 
 
 if __name__ == "__main__":
+    tf.config.set_visible_devices([], "GPU")
     app.run(main)

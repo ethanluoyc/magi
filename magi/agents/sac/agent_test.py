@@ -4,27 +4,10 @@ import acme
 from acme import specs
 from acme.testing import fakes
 from acme.utils import loggers
-import haiku as hk
 
+from magi.agents.sac import config as sac_config
 from magi.agents.sac import networks
 from magi.agents.sac.agent import SACAgent
-
-
-def policy_fn(action_spec):
-    def fn(x):
-        return networks.GaussianPolicy(
-            hidden_units=(32, 32), action_size=action_spec.shape[0]
-        )(x)
-
-    return fn
-
-
-def critic_fn():
-    def fn(x, a):
-        critic = networks.DoubleCritic(hidden_units=(32, 32))
-        return critic(x, a)
-
-    return fn
 
 
 class SACTest(absltest.TestCase):
@@ -34,22 +17,24 @@ class SACTest(absltest.TestCase):
             action_dim=2, observation_dim=3, episode_length=10, bounded=True
         )
         spec = specs.make_environment_spec(environment)
-        print(spec)
 
         # Make network purely functional
-        policy = hk.without_apply_rng(
-            hk.transform(policy_fn(spec.actions), apply_rng=True)
+        agent_networks = networks.make_networks(
+            spec,
+            policy_layer_sizes=(32, 32),
+            critic_layer_sizes=(32, 32),
         )
-        critic = hk.without_apply_rng(hk.transform(critic_fn(), apply_rng=True))
 
         # Construct the agent.
         agent = SACAgent(
             environment_spec=spec,
-            policy=policy,
-            critic=critic,
+            networks=agent_networks,
+            config=sac_config.SACConfig(
+                target_entropy=sac_config.target_entropy_from_env_spec(spec),
+                min_replay_size=1,
+                batch_size=1,
+            ),
             seed=0,
-            initial_num_steps=10,
-            batch_size=1,
         )
 
         # Try running the environment loop. We have no assertions here because all
