@@ -1,10 +1,16 @@
 """Data augmentations used in DrQ."""
-# From https://github.com/ikostrikov/jax-rl/blob/main/jax_rl/agents/drq/augmentations.py
+from typing import Callable
+
+from acme import types
+from acme.jax import types as jax_types
 import jax
 import jax.numpy as jnp
 
+DataAugmentation = Callable[[jax_types.PRNGKey, types.NestedArray], types.NestedArray]
 
-def random_crop(key, img, padding):
+
+# From https://github.com/ikostrikov/jax-rl/blob/main/jax_rl/agents/drq/augmentations.py
+def random_crop(key: jax_types.PRNGKey, img, padding):
     crop_from = jax.random.randint(key, (2,), 0, 2 * padding + 1)
     crop_from = jnp.concatenate([crop_from, jnp.zeros((1,), dtype=jnp.int32)])
     padded_img = jnp.pad(

@@ -4,7 +4,6 @@ from typing import Optional
 from acme.adders import reverb as adders_reverb
 
 from magi.agents.drq import augmentations
-from magi.agents.drq import types
 
 
 @dataclasses.dataclass
@@ -12,7 +11,7 @@ class DrQConfig:
     """Configuration parameters for DrQ."""
 
     target_entropy: float
-    augmentation: types.DataAugmentation = augmentations.batched_random_crop
+    augmentation: augmentations.DataAugmentation = augmentations.batched_random_crop
 
     min_replay_size: int = 1_000
     max_replay_size: int = 1_000_000

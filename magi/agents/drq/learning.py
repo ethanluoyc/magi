@@ -17,9 +17,6 @@ import optax
 import reverb
 
 from magi.agents.drq import augmentations
-from magi.agents.drq import types
-
-batched_random_crop = jax.jit(augmentations.batched_random_crop)
 
 
 def soft_update(
@@ -161,7 +158,7 @@ class DrQLearner(core.Learner):
         policy_network: hk.Transformed,
         critic_network: hk.Transformed,
         target_entropy: float,
-        augmentation: Optional[types.DataAugmentation] = None,
+        augmentation: Optional[augmentations.DataAugmentation] = None,
         policy_optimizer: Optional[optax.GradientTransformation] = None,
         critic_optimizer: Optional[optax.GradientTransformation] = None,
         temperature_optimizer: Optional[optax.GradientTransformation] = None,
@@ -180,7 +177,7 @@ class DrQLearner(core.Learner):
         self._actor_update_frequency = actor_update_frequency
         self._critic_target_update_frequency = critic_target_update_frequency
         self._target_entropy = target_entropy
-        self._augmentation = augmentation or batched_random_crop
+        self._augmentation = augmentation or augmentations.batched_random_crop
         self._augmentation = jax.jit(augmentation)
         self._counter = counter if counter is not None else counting.Counter()
         self._logger = (
