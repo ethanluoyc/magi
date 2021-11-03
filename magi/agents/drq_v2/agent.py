@@ -54,7 +54,7 @@ class DrQV2(agent_lib.Agent):
         replay_client = reverb.Client(address)
         # The dataset provides an interface to sample from replay.
         dataset = self.builder.make_dataset_iterator(replay_client)
-        if config.prefetch_size is not None:
+        if config.prefetch_size is not None and config.prefetch_size > 1:
             device = jax.devices()[0] if device_prefetch else None
             dataset = utils.prefetch(dataset, config.prefetch_size, device)
         learner = self.builder.make_learner(
