@@ -1,7 +1,7 @@
 import jax
 import ml_collections
 
-from magi.environments import termination_fns
+from magi.examples.pets.environments import termination_fns
 
 
 def get_base_config():

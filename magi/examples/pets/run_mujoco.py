@@ -18,10 +18,10 @@ import numpy as np
 import wandb
 
 from magi.agents.pets import builder
-from magi.environments.pets_cartpole import CartpoleEnv
-from magi.environments.pets_halfcheetah import HalfCheetahEnv
-from magi.environments.pets_pusher import PusherEnv
-from magi.environments.pets_reacher import Reacher3DEnv
+from magi.examples.pets.environments.pets_cartpole import CartpoleEnv
+from magi.examples.pets.environments.pets_halfcheetah import HalfCheetahEnv
+from magi.examples.pets.environments.pets_pusher import PusherEnv
+from magi.examples.pets.environments.pets_reacher import Reacher3DEnv
 from magi.utils import loggers
 
 FLAGS = flags.FLAGS
