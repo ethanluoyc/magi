@@ -1,8 +1,8 @@
 import jax
 
-from magi.environments import reward_fns
-from magi.environments import termination_fns
 from magi.examples.pets.configs import base
+from magi.examples.pets.environments import reward_fns
+from magi.examples.pets.environments import termination_fns
 
 
 def get_config():

@@ -14,7 +14,7 @@ from ml_collections import config_flags
 import numpy as np
 
 from magi.agents.pets import builder
-from magi.environments.cartpole_continuous import CartPoleEnv
+from magi.examples.pets.environments.cartpole_continuous import CartPoleEnv
 from magi.utils import loggers
 
 FLAGS = flags.FLAGS
