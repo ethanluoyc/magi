@@ -7,5 +7,5 @@ isort==5.8.0
 black==21.6b0
 flake8==3.9.2
 # flake8-import-order==0.18.1
-pytype==2021.05.14
+pytype==2021.11.2
 pre-commit==2.12.1

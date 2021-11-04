@@ -59,12 +59,16 @@ class CRRLearner(acme.Learner):
                 "baseline_reduce_function must be one of ['mean', 'max', 'min'], "
                 f"got {baseline_reduce_function}"
             )
-        policy_optimizer = policy_optimizer or optax.chain(
-            optax.clip_by_global_norm(40.0), optax.adam(1e-4)
-        )
-        critic_optimizer = critic_optimizer or optax.chain(
-            optax.clip_by_global_norm(40.0), optax.adam(1e-4)
-        )
+        if policy_optimizer is None:
+            policy_optimizer = optax.chain(
+                optax.clip_by_global_norm(40.0),
+                optax.adam(1e-4),
+            )
+        if critic_optimizer is None:
+            critic_optimizer = optax.chain(
+                optax.clip_by_global_norm(40.0),
+                optax.adam(1e-4),
+            )
 
         def critic_mean(logits, atoms):
             """Compute the expected value from distributional critic"""
