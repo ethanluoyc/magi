@@ -55,6 +55,13 @@ Refer to [CONTRIBUTING.md](./CONTRIBUTING.md).
 Magi is inspired by many of the open-source RL projects out there. Since we
 have a very small number of developers, we take advantage of bits and pieces of
 good implementation from other repositories.
+Here is a (non-exhaustive) list of related libraries and packages that Magi references:
+
+* https://github.com/deepmind/acme
+* https://github.com/ikostrikov/jaxrl
+* https://github.com/tensorflow/agents
+* https://github.com/rail-berkeley/rlkit
+
 
 ## License
-TODO: open-source timeline not yet decided.
+[Apache License 2.0](https://github.com/ethanluoyc/magi/blob/develop/LICENSE)
