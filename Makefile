@@ -3,14 +3,16 @@ N_CPUS ?= $(shell grep -c ^processor /proc/cpuinfo)
 
 .PHONY: typecheck
 typecheck:
-	pytype -j $(N_CPUS) $(SRC)
+	pytype -k -j $(N_CPUS) $(SRC)
 
 .PHONY: test
 test:
 	JAX_PLATFORM_NAME=cpu pytest -n $(N_CPUS) \
 		--color=yes \
 		-rf \
-		--ignore=magi/experimental \
+		--ignore-glob="*/agent_test.py" \
+		--ignore-glob="*/agent_distributed_test.py" \
+		--durations=10 \
 		$(SRC)
 
 .PHONY: isort
@@ -34,6 +36,5 @@ lint:
 .PHONY: install
 install:
 	pip install -U pip setuptools wheel
-	pip install -r requirements-dev.txt
-	pip install -r requirements.txt
+	pip install -r requirements-dev.txt -r requirements.txt
 	pip install -e .
