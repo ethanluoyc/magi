@@ -16,12 +16,11 @@ import optax
 import reverb
 
 from magi.agents.impala import acting
-from magi.agents.impala import learning
 from magi.agents.impala import config as impala_config
-from magi.agents import builders
+from magi.agents.impala import learning
 
 
-class IMPALABuilder(builders.ActorLearnerBuilder):
+class IMPALABuilder:
     """Builder for D4PG which constructs individual components of the agent."""
 
     def __init__(self, config: impala_config.IMPALAConfig, initial_state):
