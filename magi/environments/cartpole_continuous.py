@@ -180,6 +180,7 @@ class CartPoleEnv(gym.Env):
         cartheight = 30.0
 
         if self.viewer is None:
+            # pylint: disable=import-outside-toplevel
             from gym.envs.classic_control import rendering
 
             self.viewer = rendering.Viewer(screen_width, screen_height)

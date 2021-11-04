@@ -30,6 +30,7 @@ def no_termination(act: jnp.ndarray, next_obs: jnp.ndarray) -> jnp.ndarray:
 
 
 def inverted_pendulum(act: jnp.ndarray, next_obs: jnp.ndarray) -> jnp.ndarray:
+    del act  # No cost on the pendulum control signnals
     assert len(next_obs.shape) == 2
 
     not_done = jnp.isfinite(next_obs).all(-1) * (next_obs[:, 1].abs() <= 0.2)
