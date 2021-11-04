@@ -15,6 +15,7 @@ import jax
 import ml_collections
 from ml_collections import config_flags
 import numpy as np
+import wandb
 
 from magi.agents.pets import builder
 from magi.environments.pets_cartpole import CartpoleEnv
@@ -129,8 +130,6 @@ def main(unused_argv):
         )
 
     if FLAGS.wandb:
-        import wandb
-
         wandb.finish()
 
 
