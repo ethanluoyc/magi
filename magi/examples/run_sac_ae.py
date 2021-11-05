@@ -9,12 +9,11 @@ from dm_control import suite  # pytype: disable=import-error
 from dm_control.suite.wrappers import pixels  # pytype: disable=import-error
 import numpy as np
 
+from magi import wrappers as magi_wrappers
 from magi.agents import sac_ae
 from magi.agents.sac_ae import networks
 from magi.agents.sac_ae.agent import SACAEConfig
 from magi.utils import loggers
-from magi.utils.wrappers import FrameStackingWrapper
-from magi.utils.wrappers import TakeKeyWrapper
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("domain_name", "cheetah", "dm_control domain")
@@ -52,9 +51,9 @@ def load_env(domain_name, task_name, seed, frame_stack, action_repeat):
         env, pixels_only=True, render_kwargs={"width": 84, "height": 84, "camera_id": 0}
     )
     env = wrappers.CanonicalSpecWrapper(env)
-    env = TakeKeyWrapper(env, "pixels")
+    env = magi_wrappers.TakeKeyWrapper(env, "pixels")
     env = wrappers.ActionRepeatWrapper(env, action_repeat)
-    env = FrameStackingWrapper(env, num_frames=frame_stack)
+    env = magi_wrappers.FrameStackingWrapper(env, num_frames=frame_stack)
     env = wrappers.SinglePrecisionWrapper(env)
     return env
 

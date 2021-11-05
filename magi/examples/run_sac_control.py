@@ -10,9 +10,9 @@ from dm_control import suite  # pytype: disable=import-error
 import numpy as np
 import tensorflow as tf
 
+from magi import wrappers as magi_wrappers
 from magi.agents import sac
 from magi.utils import loggers
-from magi.utils import wrappers as magi_wrappers
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("domain_name", "cartpole", "dm_control domain")

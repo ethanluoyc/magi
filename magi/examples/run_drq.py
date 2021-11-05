@@ -11,11 +11,10 @@ import jax
 import numpy as np
 import tensorflow as tf
 
+from magi import wrappers as magi_wrappers
 from magi.agents import drq
 from magi.agents import sac
 from magi.utils import loggers
-from magi.utils.wrappers import FrameStackingWrapper
-from magi.utils.wrappers import TakeKeyWrapper
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("domain_name", "cheetah", "dm_control domain")
@@ -55,9 +54,9 @@ def load_env(domain_name, task_name, seed, frame_stack, action_repeat):
         env, pixels_only=True, render_kwargs={"width": 84, "height": 84, "camera_id": 0}
     )
     env = wrappers.CanonicalSpecWrapper(env)
-    env = TakeKeyWrapper(env, "pixels")
+    env = magi_wrappers.TakeKeyWrapper(env, "pixels")
     env = wrappers.ActionRepeatWrapper(env, action_repeat)
-    env = FrameStackingWrapper(env, num_frames=frame_stack)
+    env = magi_wrappers.FrameStackingWrapper(env, num_frames=frame_stack)
     env = wrappers.SinglePrecisionWrapper(env)
     return env
 
