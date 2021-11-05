@@ -6,7 +6,7 @@ from acme.utils import loggers
 
 from magi.agents import drq
 from magi.agents import sac
-from magi.utils import fakes
+from magi.testing import fakes
 
 
 class DrQTest(absltest.TestCase):

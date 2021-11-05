@@ -7,7 +7,7 @@ from acme.utils import loggers
 from magi.agents.sac_ae import networks
 from magi.agents.sac_ae.agent import SACAEAgent
 from magi.agents.sac_ae.agent import SACAEConfig
-from magi.utils import fakes
+from magi.testing import fakes
 
 
 class SACAETest(absltest.TestCase):
