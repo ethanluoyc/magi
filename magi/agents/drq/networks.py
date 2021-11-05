@@ -7,12 +7,14 @@ from acme.jax import utils
 import haiku as hk
 import jax
 import jax.numpy as jnp
+import numpy as onp
 import tensorflow_probability.substrates.jax as tfp
 
 tfd = tfp.distributions
 tfb = tfp.bijectors
 
-orthogonal_init = hk.initializers.Orthogonal(scale=jnp.sqrt(2.0))
+# Use onp since we don't want to initialize JAX on imports
+orthogonal_init = hk.initializers.Orthogonal(scale=onp.sqrt(2.0))
 
 
 @dataclass
