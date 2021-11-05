@@ -1,0 +1,32 @@
+# Template for commit messages
+# Refer to https://www.conventionalcommits.org/en/v1.0.0/#summary
+# ----------------------------------------------------------
+# Header - type(scope): Brief description
+# ----------------------------------------------------------
+#    * feat             A new feature - SemVar PATCH
+#    * fix              A bug fix - SemVar MINOR
+#    * BREAKING CHANGE  Breaking API change - SemVar MAJOR
+#    * docs             Change to documentation only
+#    * style            Change to style (whitespace, etc.)
+#    * refactor         Change not related to a bug or feat
+#    * perf             Change that affects performance
+#    * test             Change that adds/modifies tests
+#    * build            Change to build system
+#    * ci               Change to CI pipeline/workflow
+#    * chore            General tooling/config/min refactor
+# ----------------------------------------------------------
+
+
+# ----------------------------------------------------------
+# Body - More description, if necessary
+# ----------------------------------------------------------
+#    * Motivation behind changes, more detail into how
+#      functionality might be affected, etc.
+# ----------------------------------------------------------
+
+
+# ----------------------------------------------------------
+# Footer - Associated issues, PRs, etc.
+# ----------------------------------------------------------
+#    * Ex: Resolves Issue #207, see PR #15, etc.
+# ----------------------------------------------------------
