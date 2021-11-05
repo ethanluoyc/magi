@@ -1,3 +1,4 @@
+"""Acting component for DrQ-V2."""
 from typing import Optional
 
 from acme import adders
@@ -12,6 +13,8 @@ from magi.agents.drq_v2 import networks as drq_v2_networks
 
 
 class DrQV2Actor(core.Actor):
+    """Actor component for DrQ-V2 agent."""
+
     def __init__(
         self,
         policy: drq_v2_networks.DrQV2PolicyNetwork,

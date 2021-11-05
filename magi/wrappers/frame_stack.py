@@ -1,4 +1,5 @@
 # Copyright 2019 DeepMind Technologies Limited.
+# Copyright 2021 Yicheng Luo.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,6 +12,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Environment wrappers for stacking observations.
+Compared to the original implementation, this concatenates the observations
+along the last axis.
+"""
 import collections
 
 from acme import types
@@ -88,28 +93,3 @@ class FrameStacker:
             dtype=spec.dtype,
             name=spec.name,
         )
-
-
-class TakeKeyWrapper(base.EnvironmentWrapper):
-    """Wraps a control environment and adds a rendered pixel observation."""
-
-    def __init__(self, environment, key="pixels"):
-        super().__init__(environment)
-        self._key = key
-
-    def reset(self):
-        time_step = self._environment.reset()
-        return time_step._replace(observation=time_step.observation[self._key])
-
-    def step(self, action):
-        time_step = self._environment.step(action)
-        return time_step._replace(observation=time_step.observation[self._key])
-
-    def observation_spec(self):
-        return self._environment.observation_spec()[self._key]
-
-    def action_spec(self):
-        return self._environment.action_spec()
-
-    def __getattr__(self, name):
-        return getattr(self._environment, name)

@@ -22,7 +22,7 @@ from magi.agents.drq_v2 import networks as drq_v2_networks
 
 
 class DrQV2Builder(builders.ActorLearnerBuilder):
-    """DrQ-v2"""
+    """DrQ-v2 Builder."""
 
     def __init__(
         self,

@@ -1,3 +1,4 @@
+"""Gaussian MLP ensembles."""
 from typing import Optional, Sequence
 
 import haiku as hk
@@ -101,6 +102,8 @@ def _truncated_normal_w_init(shape, dtype):
 
 
 class GaussianMLP(hk.Module):
+    """MLP with Gaussian distribution outputs."""
+
     def __init__(
         self,
         output_size: int,

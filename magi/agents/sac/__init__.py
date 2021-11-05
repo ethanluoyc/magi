@@ -1,3 +1,4 @@
+"""Soft Actor-Critic agent implementation."""
 from magi.agents.sac.agent import SACAgent  # noqa
 from magi.agents.sac.builder import SACBuilder  # noqa
 from magi.agents.sac.config import SACConfig  # noqa

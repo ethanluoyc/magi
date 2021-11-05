@@ -1,3 +1,4 @@
+"""Default networks for SAC-AE agent."""
 from dataclasses import dataclass
 import math
 from typing import Sequence
@@ -10,6 +11,8 @@ import numpy as np
 
 
 class MLP(hk.Module):
+    """MLP with orthogonal initialization."""
+
     def __init__(
         self,
         output_dim,
@@ -218,6 +221,8 @@ class Decoder(hk.Module):
 
 @dataclass
 class GaussianTanhTransformedHead:
+    """Head for tanh-squahsed normal distributions."""
+
     mean: jnp.ndarray
     log_std: jnp.ndarray
 

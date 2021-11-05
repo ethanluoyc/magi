@@ -1,3 +1,4 @@
+"""CRR agent builder."""
 from typing import Any, Callable, Iterator, List, Optional
 
 from acme import adders
@@ -22,7 +23,7 @@ PolicyNetwork = Any
 
 
 class CRRBuilder(builders.ActorLearnerBuilder):
-    """Soft Actor-Critic agent specification"""
+    """CRR agent specification"""
 
     def __init__(
         self,

@@ -1,3 +1,4 @@
+"""Default networks for SAC actor and critic."""
 from typing import Sequence
 
 from acme import specs
@@ -27,6 +28,8 @@ class GaussianPolicy(hk.Module):
 
 
 class DoubleCritic(hk.Module):
+    """Critic for SAC."""
+
     def __init__(self, hidden_units=(256, 256), name=None):
         super().__init__(name=name)
         self.num_critics = 2

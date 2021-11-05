@@ -21,7 +21,7 @@ from magi.agents.impala import learning
 
 
 class IMPALABuilder:
-    """Builder for D4PG which constructs individual components of the agent."""
+    """Builder for IMPALA which constructs individual components of the agent."""
 
     def __init__(self, config: impala_config.IMPALAConfig, initial_state):
         self._config = config

@@ -1,3 +1,4 @@
+"""Configuration for DrQ agent."""
 import dataclasses
 from typing import Optional
 

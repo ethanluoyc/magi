@@ -17,6 +17,8 @@ import rlax
 
 
 class TrainingState(NamedTuple):
+    """Training state for CRR agent."""
+
     policy_params: hk.Params
     critic_params: hk.Params
     policy_opt_state: hk.Params
@@ -28,6 +30,8 @@ class TrainingState(NamedTuple):
 
 
 class CRRLearner(acme.Learner):
+    """CRR Learner component."""
+
     _state: TrainingState
 
     def __init__(

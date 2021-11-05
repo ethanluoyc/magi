@@ -1,3 +1,4 @@
+"""IMPALA agent."""
 from magi.agents.impala.acting import IMPALAActor  # noqa
 from magi.agents.impala.agent import IMPALAFromConfig  # noqa
 from magi.agents.impala.builder import IMPALABuilder  # noqa

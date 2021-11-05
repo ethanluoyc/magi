@@ -1,3 +1,4 @@
+"""Single-process IMPALA Agent."""
 from typing import Optional, Sequence
 
 import acme

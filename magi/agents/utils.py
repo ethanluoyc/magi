@@ -1,3 +1,4 @@
+"""Utilities useful for creating agents."""
 import jax
 
 

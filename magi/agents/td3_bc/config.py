@@ -1,3 +1,4 @@
+"""TD3-BC agent configuration."""
 import dataclasses
 from typing import Optional
 
@@ -7,6 +8,8 @@ import optax
 
 @dataclasses.dataclass
 class TD3BCConfig:
+    """TD3-BC configuration."""
+
     policy_optimizer: Optional[optax.GradientTransformation] = None
     critic_optimizer: Optional[optax.GradientTransformation] = None
     discount: float = 0.99

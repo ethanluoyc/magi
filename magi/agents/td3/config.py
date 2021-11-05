@@ -1,3 +1,4 @@
+"""TD3 agent configuration."""
 import dataclasses
 from typing import Optional
 

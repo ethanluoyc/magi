@@ -24,6 +24,8 @@ DrQV2PolicyNetwork = Callable[
 
 
 class Encoder(hk.Module):
+    """Encoder used by DrQ-v2."""
+
     def __call__(self, x):
         # Floatify the image.
         x = x.astype(jnp.float32) / 255.0 - 0.5
@@ -51,6 +53,8 @@ class Encoder(hk.Module):
 
 
 class Actor(hk.Module):
+    """Policy network used by DrQ-v2."""
+
     def __init__(
         self,
         action_size: int,
@@ -91,6 +95,8 @@ class Actor(hk.Module):
 
 
 class Critic(hk.Module):
+    """Single Critic network used by DrQ-v2."""
+
     def __init__(self, hidden_size: int = 1024, name: Optional[str] = None):
         super().__init__(name)
         self.hidden_size = hidden_size
@@ -108,6 +114,11 @@ class Critic(hk.Module):
 
 
 class DoubleCritic(hk.Module):
+    """Twin critic network used by DrQ-v2.
+
+    This is simply two identical Critic module.
+    """
+
     def __init__(self, latent_size: int = 50, hidden_size: int = 1024, name=None):
         super().__init__(name)
         self.hidden_size = hidden_size

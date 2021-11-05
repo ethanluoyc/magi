@@ -1,3 +1,4 @@
+"""Configuration for reacher."""
 import jax
 import jax.numpy as np
 

@@ -1,3 +1,4 @@
+"""Configuration for running PETS pusher expeirment"""
 import jax
 import jax.numpy as np
 

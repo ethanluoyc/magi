@@ -1,3 +1,4 @@
+"""Configuration for running PETS halfcheetah experiments."""
 import jax
 import jax.numpy as jnp
 

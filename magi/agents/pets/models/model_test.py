@@ -1,3 +1,4 @@
+"""Tests for ensemble models."""
 from absl.testing import absltest
 import haiku as hk
 import jax

@@ -1,3 +1,4 @@
+"""Optimizers used by MBRL planners."""
 from typing import Callable, Optional, Tuple
 
 import chex

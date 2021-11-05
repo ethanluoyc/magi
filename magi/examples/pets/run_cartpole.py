@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
+"""Run PETS on classical continuous cartpole."""
 
 import time
 

@@ -1,3 +1,4 @@
+"""Tests for optimizers."""
 from absl.testing import absltest
 import chex
 import jax

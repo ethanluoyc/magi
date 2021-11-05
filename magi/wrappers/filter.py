@@ -1,3 +1,4 @@
+"""Environment wrappers for filtering observations."""
 from acme.wrappers import base
 
 

@@ -1,4 +1,4 @@
-"V1 does not work on hopper-medium, investigate why"
+"Learner component for TD3-BC."
 import copy
 from typing import Iterator, List, NamedTuple, Optional
 
@@ -20,6 +20,8 @@ def mse_loss(a, b):
 
 
 class TrainingState(NamedTuple):
+    """Training state for TD3-BC learner."""
+
     policy_params: hk.Params
     critic_params: hk.Params
     policy_opt_state: optax.OptState
@@ -30,6 +32,8 @@ class TrainingState(NamedTuple):
 
 
 class TD3BCLearner(acme.Learner):
+    """TD3-BC learner."""
+
     def __init__(
         self,
         policy_network: networks_lib.FeedForwardNetwork,

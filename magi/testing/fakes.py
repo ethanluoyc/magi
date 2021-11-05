@@ -1,3 +1,4 @@
+"""Fake objects used for testing."""
 from typing import Sequence
 
 from acme import specs

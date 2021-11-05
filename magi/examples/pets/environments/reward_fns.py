@@ -1,3 +1,4 @@
+"""Reward functions used in PETS environments."""
 import jax.numpy as jnp
 
 from . import termination_fns

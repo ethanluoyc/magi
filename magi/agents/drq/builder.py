@@ -1,4 +1,4 @@
-"""SAC builder"""
+"""DrQ agent builder."""
 from typing import Callable, Iterator, List, Optional
 
 from acme import adders

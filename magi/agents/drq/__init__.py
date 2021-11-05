@@ -1,3 +1,4 @@
+"""Data-regularized Q agent implementation."""
 from magi.agents.drq.agent import DrQAgent  # noqa
 from magi.agents.drq.config import DrQConfig  # noqa
 from magi.agents.drq.learning import DrQLearner  # noqa

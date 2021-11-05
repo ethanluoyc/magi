@@ -1,3 +1,4 @@
+"""Configuration parameters for CRR."""
 import dataclasses
 from typing import Optional
 
@@ -7,6 +8,8 @@ import optax
 
 @dataclasses.dataclass
 class CRRConfig:
+    """Configuration parameters for CRR."""
+
     policy_optimizer: Optional[optax.GradientTransformation] = None
     critic_optimizer: Optional[optax.GradientTransformation] = None
     discount: float = 0.99

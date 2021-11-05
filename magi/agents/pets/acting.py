@@ -1,3 +1,4 @@
+"""Acting component for PETS agent."""
 from typing import Union
 
 from absl import logging
@@ -34,6 +35,8 @@ def _make_trajectory_cost_fn(model, num_particles: int):
 
 
 class OptimizerBasedActor(core.Actor):
+    """Model-based actor using an optimizer for planning"""
+
     def __init__(
         self,
         spec: specs.EnvironmentSpec,
@@ -130,6 +133,8 @@ class OptimizerBasedActor(core.Actor):
 
 
 class CEMOptimizerActor(OptimizerBasedActor):
+    """Model-based actor using a CEM optimizer for planning"""
+
     def __init__(
         self,
         spec: specs.EnvironmentSpec,
@@ -182,6 +187,8 @@ class CEMOptimizerActor(OptimizerBasedActor):
 
 
 class RandomOptimizerActor(OptimizerBasedActor):
+    """Model-based actor using a random optimizer for planning"""
+
     def __init__(
         self,
         spec,

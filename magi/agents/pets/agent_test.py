@@ -1,3 +1,4 @@
+"""Tests for PETS agent."""
 from absl.testing import absltest
 from absl.testing import parameterized
 import acme
@@ -48,6 +49,8 @@ def make_environment():
 
 
 class PetsTest(parameterized.TestCase):
+    """Tests for the PETS agent."""
+
     @parameterized.parameters(
         ("random",),
         ("cem",),

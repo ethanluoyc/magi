@@ -1,3 +1,4 @@
+"""Default networks used by CRR agent."""
 from typing import Dict, NamedTuple, Optional, Sequence, Union
 
 from acme import specs

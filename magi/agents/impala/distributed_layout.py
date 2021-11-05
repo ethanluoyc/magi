@@ -1,3 +1,4 @@
+"""Distribtued layout for IMPALA."""
 from typing import Any, Callable, Dict, Optional
 
 import acme
@@ -12,8 +13,8 @@ import jax
 import launchpad as lp
 import reverb
 
-from magi.agents.impala import builder as builder_lib
 from magi.agents import utils
+from magi.agents.impala import builder as builder_lib
 
 
 class IMPALADistributedLayout:

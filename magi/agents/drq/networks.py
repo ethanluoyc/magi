@@ -1,3 +1,4 @@
+"""Default networks used by DrQ agent."""
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
@@ -19,6 +20,8 @@ orthogonal_init = hk.initializers.Orthogonal(scale=onp.sqrt(2.0))
 
 @dataclass
 class GaussianTanhTransformedDistribution:
+    """Parametric tanh-squahsed MVN distribution."""
+
     # TODO(yl): test the head module from acme.
     mean: jnp.ndarray
     log_std: jnp.ndarray
@@ -43,6 +46,8 @@ class GaussianTanhTransformedDistribution:
 
 
 class Encoder(hk.Module):
+    """Encoder network used by DrQ-v1"""
+
     def __init__(self, num_layers=4, num_filters=32, activation=jax.nn.relu):
         super().__init__()
         self.num_layers = num_layers
@@ -76,6 +81,8 @@ class Encoder(hk.Module):
 
 
 class Actor(hk.Module):
+    """Policy network used by DrQ-v1"""
+
     def __init__(
         self,
         action_size: int,
@@ -109,6 +116,8 @@ class Actor(hk.Module):
 
 
 class Critic(hk.Module):
+    """Critic network used by DrQ-v1 agent."""
+
     def __init__(self, hidden_sizes=(256, 256), name=None):
         super().__init__(name)
         self.hidden_sizes = hidden_sizes
@@ -124,6 +133,8 @@ class Critic(hk.Module):
 
 
 class DoubleCritic(hk.Module):
+    """Twin critic network used by DrQ-v1 agent."""
+
     def __init__(self, latent_size: int = 50, hidden_sizes=(256, 256), name=None):
         super().__init__(name)
         self.hidden_sizes = hidden_sizes
@@ -140,6 +151,8 @@ class DoubleCritic(hk.Module):
 
 
 def apply_policy_sample(networks, eval_mode: bool):
+    """Return a pure function for the DrQ-v1 policy"""
+
     def policy_network(params, key, observation):
         feature_map = networks["encoder"].apply(params["encoder"], observation)
         action_dist = networks["actor"].apply(params["actor"], feature_map)
@@ -158,6 +171,8 @@ def make_networks(
     num_filters: int = 32,
     num_layers: int = 4,
 ):
+    """Create default neural networks used by DrQ-v1."""
+
     def _critic(x, a):
         return DoubleCritic(
             latent_size=latent_size,

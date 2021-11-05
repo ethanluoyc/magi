@@ -1,3 +1,4 @@
+"""SAC Learner."""
 from functools import partial
 import time
 from typing import Iterator, NamedTuple, Optional
@@ -18,6 +19,8 @@ from magi.agents.sac import losses
 
 
 class TrainingState(NamedTuple):
+    """Training state for SAC learner."""
+
     policy_params: networks_lib.Params
     critic_params: networks_lib.Params
     critic_target_params: networks_lib.Params
@@ -29,6 +32,8 @@ class TrainingState(NamedTuple):
 
 
 class SACLearner(core.Learner):
+    """SAC learner."""
+
     def __init__(
         self,
         policy: networks_lib.FeedForwardNetwork,

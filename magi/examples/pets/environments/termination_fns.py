@@ -1,3 +1,4 @@
+"""Termination functions used in PETS environments."""
 import math
 
 import jax.numpy as jnp

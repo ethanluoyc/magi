@@ -1,3 +1,4 @@
+"""SAC-AE agent."""
 import dataclasses
 from functools import partial
 import time
@@ -213,6 +214,8 @@ class SACAEConfig:
 
 
 class SACAEAgent(core.Actor, core.VariableSource):
+    """SAC-AE agent."""
+
     def __init__(
         self,
         environment_spec: specs.EnvironmentSpec,

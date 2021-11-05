@@ -1,3 +1,4 @@
+"""Generic actors."""
 import functools
 from typing import Optional
 

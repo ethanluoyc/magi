@@ -19,6 +19,8 @@ def _mse_loss(a, b):
 
 
 class TrainingState(NamedTuple):
+    """Training state for TD3 learner."""
+
     policy_params: hk.Params
     critic_params: hk.Params
     policy_opt_state: hk.Params
@@ -29,6 +31,8 @@ class TrainingState(NamedTuple):
 
 
 class TD3Learner(acme.Learner):
+    """TD3 learner."""
+
     def __init__(
         self,
         policy_network: hk.Transformed,

@@ -1,3 +1,4 @@
+"""Learning component for MBRL agent."""
 from typing import Dict, List, NamedTuple, Optional
 
 from absl import logging
@@ -17,12 +18,16 @@ from magi.agents.pets import replay as replay_lib
 
 
 class TraningState(NamedTuple):
+    """Training state for MBRL learner."""
+
     params: hk.Params
     opt_state: optax.OptState
     state: models.ModelState
 
 
 class ModelBasedLearner(core.Learner):
+    """A generic ensemble based learner."""
+
     def __init__(
         self,
         spec: specs.EnvironmentSpec,

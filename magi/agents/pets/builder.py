@@ -1,3 +1,6 @@
+"""Building components for PETS agent.
+TODO(yl): create a generic builder instead of splitting into functions.
+"""
 from acme import specs
 from acme.jax import variable_utils
 import jax

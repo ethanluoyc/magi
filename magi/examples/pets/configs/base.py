@@ -1,3 +1,4 @@
+"""Base configuration for running PETS experiments."""
 import jax
 import ml_collections
 

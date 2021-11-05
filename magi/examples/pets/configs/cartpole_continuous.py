@@ -1,3 +1,4 @@
+"""Configuration for running PETS cartpole experiments."""
 import jax
 
 from magi.examples.pets.configs import base

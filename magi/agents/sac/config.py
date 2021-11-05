@@ -1,3 +1,4 @@
+"""Soft Actor-Critic agent parameters."""
 import dataclasses
 from typing import Optional
 
@@ -13,6 +14,8 @@ def target_entropy_from_env_spec(env_spec: specs.EnvironmentSpec) -> float:
 
 @dataclasses.dataclass
 class SACConfig:
+    """Soft Actor-Critic agent parameters."""
+
     target_entropy: Optional[float] = None
     min_replay_size: int = 1000
     max_replay_size: int = 1_000_000

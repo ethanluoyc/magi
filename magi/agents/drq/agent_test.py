@@ -1,4 +1,4 @@
-"""Tests for running SAC-AE agent."""
+"""Tests for running DrQ agent."""
 from absl.testing import absltest
 import acme
 from acme import specs

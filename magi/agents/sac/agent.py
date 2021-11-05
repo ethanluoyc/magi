@@ -15,6 +15,8 @@ from magi.agents.sac import config as sac_config
 
 
 class SACAgent(core.Actor):
+    """Single process SAC agent"""
+
     def __init__(
         self,
         environment_spec: specs.EnvironmentSpec,

@@ -1,9 +1,12 @@
+"""Generic model-based agent."""
 from acme import core
 import dm_env
 import numpy as np
 
 
 class ModelBasedAgent(core.Actor):
+    """Generic model-based agent."""
+
     def __init__(self, actor: core.Actor, learner: core.Learner):
         self._actor = actor
         self._learner = learner

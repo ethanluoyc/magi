@@ -1,4 +1,4 @@
-"""Tests for running DrQ-v2 agent."""
+"""Tests for running distribtued DrQ-v2 agent."""
 from absl.testing import absltest
 import acme
 from acme import specs

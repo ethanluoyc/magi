@@ -1,3 +1,4 @@
+"""NN ensembles used in PETS."""
 import functools
 from typing import Any, Callable, NamedTuple, Tuple
 
@@ -42,6 +43,8 @@ class ModelState(NamedTuple):
 
 
 class EnsembleModel:
+    """NN ensembles used in PETS."""
+
     def __init__(
         self,
         network,

@@ -1,3 +1,4 @@
+"""Builder for constructing offline TD3-BC agent."""
 from typing import Any, Callable, Iterator, List, Optional
 
 from acme import adders
