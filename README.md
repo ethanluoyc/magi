@@ -52,9 +52,7 @@ JAX_PLATFORM_NAME=cpu pytest -n `grep -c ^processor /proc/cpuinfo` magi
 Refer to [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Acknowledgements
-Magi is inspired by many of the open-source RL projects out there. Since we
-have a very small number of developers, we take advantage of bits and pieces of
-good implementation from other repositories.
+Magi is inspired by many of the open-source RL projects out there.
 Here is a (non-exhaustive) list of related libraries and packages that Magi references:
 
 * https://github.com/deepmind/acme
@@ -65,3 +63,8 @@ Here is a (non-exhaustive) list of related libraries and packages that Magi refe
 
 ## License
 [Apache License 2.0](https://github.com/ethanluoyc/magi/blob/develop/LICENSE)
+
+## Citation
+If you use Magi in your work,
+please cite us according to the [CITATION](/CITATION.cff) file.
+You may learn more about the CITATION file from [here](https://docs.github.com/en/github/creating-cloning-and-archiving-repositories/creating-a-repository-on-github/about-citation-files).

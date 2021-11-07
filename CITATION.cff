@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Luo"
+  given-names: "Yicheng"
+  orcid: "https://orcid.org/0000-0003-0547-411X"
+title: "Magi: Research Reinforcement Learning Library in JAX"
+version: 0.0.1
+date-released: 2021-11-07
+url: "https://github.com/ethanluoyc/magi"
