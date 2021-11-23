@@ -17,6 +17,8 @@ import reverb
 
 
 class TrainingState(NamedTuple):
+    """Training state for CQL Learner."""
+
     policy_params: networks_lib.Params
     critic_params: networks_lib.Params
     critic_target_params: networks_lib.Params
@@ -248,7 +250,6 @@ class CQLLearner(core.Learner):
         def alpha_loss_fn(log_alpha: jnp.ndarray, entropy: jnp.ndarray):
             return log_alpha * (entropy - target_entropy), {}
 
-        @jax.jit
         def _update_actor_bc(state: TrainingState, transitions: types.Transition):
             step_key, key = jax.random.split(state.key)
             (loss, aux), grad = jax.value_and_grad(bc_actor_loss_fn, has_aux=True)(
@@ -269,7 +270,6 @@ class CQLLearner(core.Learner):
             )
             return (state, loss, aux)
 
-        @jax.jit
         def _update_actor(state: TrainingState, transitions: types.Transition):
             step_key, key = jax.random.split(state.key)
             (loss, aux), grad = jax.value_and_grad(actor_loss_fn, has_aux=True)(
@@ -290,7 +290,6 @@ class CQLLearner(core.Learner):
             )
             return (state, loss, aux)
 
-        @jax.jit
         def _update_critic(
             state: TrainingState,
             transitions: types.Transition,
@@ -316,7 +315,6 @@ class CQLLearner(core.Learner):
             )
             return state, loss, aux
 
-        @jax.jit
         def _update_alpha_prime(state: TrainingState, cql_loss):
             def loss_fn(log_alpha_prime):
                 # Alpha prime loss
@@ -334,7 +332,6 @@ class CQLLearner(core.Learner):
             )
             return (state, loss, {"alpha_prime": jnp.exp(log_alpha_prime)})
 
-        @jax.jit
         def _update_alpha(state: TrainingState, entropy: jnp.ndarray):
             def loss_fn(log_alpha):
                 return alpha_loss_fn(log_alpha, entropy)
@@ -349,7 +346,6 @@ class CQLLearner(core.Learner):
             )
             return state, loss, {"alpha": jnp.exp(log_alpha)}
 
-        @jax.jit
         def _update_target(state: TrainingState):
             update_fn = partial(optax.incremental_update, step_size=tau)
             return state._replace(
@@ -358,6 +354,7 @@ class CQLLearner(core.Learner):
                 )
             )
 
+        @jax.jit
         def sgd_step(state: TrainingState, transitions: types.Transition):
             transitions = jax.device_put(transitions)
             metrics = {}
@@ -372,11 +369,13 @@ class CQLLearner(core.Learner):
                     {"alpha_prime_loss": alpha_prime_loss, **alpha_prime_metrics}
                 )
 
-            if state.steps < policy_eval_start:
-                # Maybe do BC
-                state, actor_loss, actor_metrics = _update_actor_bc(state, transitions)
-            else:
-                state, actor_loss, actor_metrics = _update_actor(state, transitions)
+            state, actor_loss, actor_metrics = jax.lax.cond(
+                state.steps < policy_eval_start,
+                lambda state: _update_actor_bc(state, transitions),
+                lambda state: _update_actor(state, transitions),
+                operand=state,
+            )
+
             metrics.update({"actor_loss": actor_loss, **actor_metrics})
             entropy = actor_metrics["entropy"]
             state, alpha_loss, alpha_metrics = _update_alpha(state, entropy)
