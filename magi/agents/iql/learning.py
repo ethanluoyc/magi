@@ -2,6 +2,7 @@
 import time
 from typing import Any, Dict, Iterator, NamedTuple, Tuple
 
+import acme
 from acme import types as core_types
 from acme.jax import networks as networks_lib
 from acme.jax import types
@@ -32,11 +33,10 @@ def expectile_loss(diff, expectile=0.8):
     return weight * (diff ** 2)
 
 
-class IQLLearner:
+class IQLLearner(acme.Learner):
     """IQL Learner."""
 
     _state: TrainingState
-    rng: types.PRNGKey
 
     def __init__(
         self,
@@ -53,6 +53,25 @@ class IQLLearner:
         counter=None,
         logger=None,
     ):
+        """Create an instance of the IQLLearner.
+
+        Args:
+            random_key (types.PRNGKey): random seed used by the learner.
+            networks (iql_networks.IQLNetworks): networks used by the learner.
+            dataset (Iterator[core_types.Transition]): dataset iterator.
+            policy_optimizer (optax.GradientTransformation): optimizer for policy.
+            critic_optimizer (optax.GradientTransformation): optimizer for critic.
+            value_optimizer (optax.GradientTransformation): optimizer for value critic.
+            discount (float, optional): additional discount. Defaults to 0.99.
+            tau (float, optional): target soft update rate. Defaults to 0.005.
+            expectile (float, optional): expectile for training critic. Defaults to 0.8.
+            temperature (float, optional): temperature for the AWR. Defaults to 0.1.
+            counter ([type], optional): counter for keeping counts. Defaults to None.
+            logger ([type], optional): logger for writing metrics. Defaults to None.
+
+        Returns:
+            An instance of IQLLearner
+        """
 
         policy_network = networks.policy_network
         value_network = networks.value_network
