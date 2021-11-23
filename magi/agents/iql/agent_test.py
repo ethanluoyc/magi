@@ -1,31 +1,32 @@
 """Integration tests for IQL learner"""
 from absl.testing import absltest
-import jax.numpy as jnp
+from acme import specs
+from acme.testing import fakes
+import jax
+import optax
 
+from magi.agents.iql import learning
 from magi.agents.iql import networks
-from magi.agents.iql import types
-from magi.agents.iql.learning import Learner
 
 
 class IQLAgentTest(absltest.TestCase):
     def test_agent_run(self):
-        observation_size = 3
-        action_size = 2
-        agent_networks = networks.make_networks(
-            jnp.zeros((observation_size,)),
-            jnp.zeros((action_size,)),
-            hidden_dims=(10, 10),
+        environment = fakes.ContinuousEnvironment(
+            action_dim=2, observation_dim=3, episode_length=10, bounded=True
         )
-        agent = Learner(0, agent_networks, max_steps=100)
-        batch_size = 3
-        batch = types.Batch(
-            observations=jnp.zeros((batch_size, observation_size)),
-            actions=jnp.zeros((batch_size, action_size)),
-            rewards=jnp.zeros((batch_size,)),
-            masks=jnp.zeros((batch_size,)),
-            next_observations=jnp.zeros((batch_size, observation_size)),
+        spec = specs.make_environment_spec(environment)
+        # # Try running the environment loop. We have no assertions here because all
+        agent_networks = networks.make_networks(spec, (10, 10))
+        dataset = fakes.transition_dataset(environment).batch(10).as_numpy_iterator()
+        learner = learning.IQLLearner(
+            random_key=jax.random.PRNGKey(0),
+            networks=agent_networks,
+            dataset=dataset,
+            policy_optimizer=optax.adam(1e-4),
+            critic_optimizer=optax.adam(1e-4),
+            value_optimizer=optax.adam(1e-4),
         )
-        agent.update(batch)
+        learner.step()
 
 
 if __name__ == "__main__":

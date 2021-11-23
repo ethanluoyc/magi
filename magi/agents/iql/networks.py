@@ -2,8 +2,11 @@
 import dataclasses
 from typing import Callable, Optional, Sequence, Tuple
 
-import flax.linen as nn
+from acme import specs
+import haiku as hk
+from jax import nn
 import jax.numpy as jnp
+import numpy as onp
 from tensorflow_probability.substrates import jax as tfp
 
 tfd = tfp.distributions
@@ -13,62 +16,73 @@ LOG_STD_MIN = -10.0
 LOG_STD_MAX = 2.0
 
 
-def default_init(scale: Optional[float] = jnp.sqrt(2)):
-    return nn.initializers.orthogonal(scale)
+# The default uses onp as we do not want to trigger JAX init
+def _default_init(scale: Optional[float] = onp.sqrt(2)):
+    return hk.initializers.Orthogonal(scale)
 
 
-class MLP(nn.Module):
+class MLP(hk.Module):
     """MLP with dropout"""
 
-    hidden_dims: Sequence[int]
-    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
-    activate_final: int = False
-    dropout_rate: Optional[float] = None
+    def __init__(
+        self,
+        hidden_dims: Sequence[int],
+        activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu,
+        activate_final: int = False,
+        dropout_rate: Optional[float] = None,
+        name: Optional[str] = None,
+    ):
+        super().__init__(name=name)
+        self.hidden_dims = hidden_dims
+        self.activations = activations
+        self.activate_final = activate_final
+        self.dropout_rate = dropout_rate
 
-    @nn.compact
-    def __call__(self, x: jnp.ndarray, training: bool = False) -> jnp.ndarray:
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         for i, size in enumerate(self.hidden_dims):
-            x = nn.Dense(size, kernel_init=default_init())(x)
+            x = hk.Linear(size, w_init=_default_init())(x)
             if i + 1 < len(self.hidden_dims) or self.activate_final:
                 x = self.activations(x)
-                if self.dropout_rate is not None:
-                    x = nn.Dropout(rate=self.dropout_rate)(
-                        x, deterministic=not training
-                    )
         return x
 
 
-class NormalTanhPolicy(nn.Module):
+class NormalTanhPolicy(hk.Module):
     """Gaussian policy."""
 
-    hidden_dims: Sequence[int]
-    action_dim: int
-    state_dependent_std: bool = True
-    dropout_rate: Optional[float] = None
-    log_std_scale: float = 1.0
-    log_std_min: Optional[float] = None
-    log_std_max: Optional[float] = None
-    tanh_squash_distribution: bool = True
-
-    @nn.compact
-    def __call__(
+    def __init__(
         self,
-        observations: jnp.ndarray,
-        temperature: float = 1.0,
-        training: bool = False,
-    ) -> tfd.Distribution:
-        outputs = MLP(
-            self.hidden_dims, activate_final=True, dropout_rate=self.dropout_rate
-        )(observations, training=training)
+        hidden_dims: Sequence[int],
+        action_dim: int,
+        state_dependent_std: bool = True,
+        log_std_scale: float = 1.0,
+        log_std_min: Optional[float] = None,
+        log_std_max: Optional[float] = None,
+        tanh_squash_distribution: bool = True,
+        name=None,
+    ):
+        super().__init__(name=name)
+        self.hidden_dims = hidden_dims
+        self.action_dim = action_dim
+        self.state_dependent_std = state_dependent_std
+        self.log_std_scale = log_std_scale
+        self.log_std_min = log_std_min
+        self.log_std_max = log_std_max
+        self.tanh_squash_distribution = tanh_squash_distribution
 
-        means = nn.Dense(self.action_dim, kernel_init=default_init())(outputs)
+    def __call__(self, observations: jnp.ndarray) -> tfd.Distribution:
+        outputs = MLP(
+            self.hidden_dims,
+            activate_final=True,
+        )(observations)
+
+        means = hk.Linear(self.action_dim, w_init=_default_init())(outputs)
 
         if self.state_dependent_std:
             log_stds = nn.Dense(
-                self.action_dim, kernel_init=default_init(self.log_std_scale)
+                self.action_dim, w_init=_default_init(self.log_std_scale)
             )(outputs)
         else:
-            log_stds = self.param("log_stds", nn.initializers.zeros, (self.action_dim,))
+            log_stds = hk.get_parameter("log_stds", (self.action_dim,), init=jnp.zeros)
 
         log_std_min = self.log_std_min or LOG_STD_MIN
         log_std_max = self.log_std_max or LOG_STD_MAX
@@ -77,9 +91,7 @@ class NormalTanhPolicy(nn.Module):
         if not self.tanh_squash_distribution:
             means = nn.tanh(means)
 
-        base_dist = tfd.MultivariateNormalDiag(
-            loc=means, scale_diag=jnp.exp(log_stds) * temperature
-        )
+        base_dist = tfd.MultivariateNormalDiag(loc=means, scale_diag=jnp.exp(log_stds))
         if self.tanh_squash_distribution:
             return tfd.TransformedDistribution(
                 distribution=base_dist, bijector=tfb.Tanh()
@@ -88,37 +100,48 @@ class NormalTanhPolicy(nn.Module):
             return base_dist
 
 
-class ValueCritic(nn.Module):
+class ValueCritic(hk.Module):
     """Value network."""
 
-    hidden_dims: Sequence[int]
+    def __init__(self, hidden_dims: Sequence[int]):
+        super().__init__()
+        self.hidden_dims = hidden_dims
 
-    @nn.compact
     def __call__(self, observations: jnp.ndarray) -> jnp.ndarray:
         critic = MLP((*self.hidden_dims, 1))(observations)
         return jnp.squeeze(critic, -1)
 
 
-class Critic(nn.Module):
+class Critic(hk.Module):
     """A single critic network."""
 
-    hidden_dims: Sequence[int]
-    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+    def __init__(
+        self,
+        hidden_dims: Sequence[int],
+        activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu,
+    ):
+        super().__init__()
+        self.hidden_dims = hidden_dims
+        self.activations = activations
 
-    @nn.compact
     def __call__(self, observations: jnp.ndarray, actions: jnp.ndarray) -> jnp.ndarray:
         inputs = jnp.concatenate([observations, actions], -1)
         critic = MLP((*self.hidden_dims, 1), activations=self.activations)(inputs)
         return jnp.squeeze(critic, -1)
 
 
-class DoubleCritic(nn.Module):
+class DoubleCritic(hk.Module):
     """Double critic network."""
 
-    hidden_dims: Sequence[int]
-    activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+    def __init__(
+        self,
+        hidden_dims: Sequence[int],
+        activations: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu,
+    ):
+        super().__init__()
+        self.hidden_dims = hidden_dims
+        self.activations = activations
 
-    @nn.compact
     def __call__(
         self, observations: jnp.ndarray, actions: jnp.ndarray
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
@@ -144,53 +167,55 @@ class IQLNetworks:
     value_network: FeedforwardNetwork
 
 
-def get_behavior_policy_network(networks: IQLNetworks, temperature: float):
-    def policy(params, key, observations):
-        dist = networks.policy_network.apply(params, observations, temperature)
-        return dist.sample(seed=key)
+def apply_policy_and_sample(
+    networks: IQLNetworks, action_spec: specs.BoundedArray, eval_mode: bool = False
+):
+    def policy_network(params, key, obs):
+        action_dist = networks.policy_network.apply(params, obs)
+        action = action_dist.mode() if eval_mode else action_dist.sample(seed=key)
+        return jnp.clip(action, action_spec.minimum, action_spec.maximum)
 
-    return policy
+    return policy_network
 
 
 def make_networks(
-    observations,
-    actions,
+    spec: specs.EnvironmentSpec,
     hidden_dims=(256, 256),
-    dropout_rate: Optional[float] = None,
 ):
-    action_dim = actions.shape[-1]
-    policy_def = NormalTanhPolicy(
-        hidden_dims,
-        action_dim,
-        log_std_scale=1e-3,
-        log_std_min=-5.0,
-        dropout_rate=dropout_rate,
-        state_dependent_std=False,
-        tanh_squash_distribution=False,
-    )
+    action_dim = spec.actions.shape[-1]
 
-    critic_def = DoubleCritic(hidden_dims)
-    value_def = ValueCritic(hidden_dims)
-    dummy_obs = jnp.zeros((1, *observations.shape), dtype=observations.dtype)
-    dummy_action = jnp.zeros((1, *actions.shape), dtype=actions.dtype)
+    def _actor_fn(observations):
+        return NormalTanhPolicy(
+            hidden_dims,
+            action_dim,
+            log_std_scale=1e-3,
+            log_std_min=-5.0,
+            state_dependent_std=False,
+            tanh_squash_distribution=False,
+        )(observations)
+
+    def _critic_fn(o, a):
+        return DoubleCritic(hidden_dims)(o, a)
+
+    def _value_fn(o):
+        return ValueCritic(hidden_dims)(o)
+
+    policy = hk.without_apply_rng(hk.transform(_actor_fn))
+    critic = hk.without_apply_rng(hk.transform(_critic_fn))
+    value = hk.without_apply_rng(hk.transform(_value_fn))
+    dummy_obs = jnp.zeros((1, *spec.observations.shape), dtype=spec.observations.dtype)
+    dummy_action = jnp.zeros((1, *spec.actions.shape), dtype=spec.actions.dtype)
 
     return IQLNetworks(
         policy_network=FeedforwardNetwork(
-            init=lambda key: policy_def.init(key, dummy_obs)["params"],
-            apply=lambda params, *args, **kwargs: policy_def.apply(
-                {"params": params}, *args, **kwargs
-            ),
+            init=lambda key: policy.init(key, dummy_obs), apply=policy.apply
         ),
         critic_network=FeedforwardNetwork(
-            init=lambda key: critic_def.init(key, dummy_obs, dummy_action)["params"],
-            apply=lambda params, *args, **kwargs: critic_def.apply(
-                {"params": params}, *args, **kwargs
-            ),
+            init=lambda key: critic.init(key, dummy_obs, dummy_action),
+            apply=critic.apply,
         ),
         value_network=FeedforwardNetwork(
-            init=lambda key: value_def.init(key, dummy_obs)["params"],
-            apply=lambda params, *args, **kwargs: value_def.apply(
-                {"params": params}, *args, **kwargs
-            ),
+            init=lambda key: value.init(key, dummy_obs),
+            apply=value.apply,
         ),
     )

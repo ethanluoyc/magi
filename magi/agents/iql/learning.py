@@ -1,25 +1,30 @@
 """Implementations of Implicit Q Learning (IQL) learner component."""
-from typing import NamedTuple, Optional, Tuple
+import time
+from typing import Any, Dict, Iterator, NamedTuple, Tuple
 
+from acme import types as core_types
+from acme.jax import networks as networks_lib
+from acme.jax import types
+from acme.utils import counting
+from acme.utils import loggers
 import jax
 import jax.numpy as jnp
 import optax
 
-from magi.agents.iql import networks as networks_lib
-from magi.agents.iql.types import Batch
-from magi.agents.iql.types import InfoDict
-from magi.agents.iql.types import Params
-from magi.agents.iql.types import PRNGKey
+from magi.agents.iql import networks as iql_networks
+
+_Metrics = Dict[str, jnp.ndarray]
 
 
 class TrainingState(NamedTuple):
-    policy_params: Params
+    policy_params: networks_lib.Params
     policy_opt_state: optax.OptState
-    value_params: Params
+    value_params: networks_lib.Params
     value_opt_state: optax.OptState
-    critic_params: Params
+    critic_params: networks_lib.Params
     critic_opt_state: optax.OptState
-    target_critic_params: Params
+    target_critic_params: networks_lib.Params
+    steps: int
 
 
 def expectile_loss(diff, expectile=0.8):
@@ -27,36 +32,27 @@ def expectile_loss(diff, expectile=0.8):
     return weight * (diff ** 2)
 
 
-class Learner:
+class IQLLearner:
+    """IQL Learner."""
 
     _state: TrainingState
-    rng: PRNGKey
+    rng: types.PRNGKey
 
     def __init__(
         self,
-        seed: int,
-        networks: networks_lib.IQLNetworks,
-        actor_lr: float = 3e-4,
-        value_lr: float = 3e-4,
-        critic_lr: float = 3e-4,
+        random_key: types.PRNGKey,
+        networks: iql_networks.IQLNetworks,
+        dataset: Iterator[core_types.Transition],
+        policy_optimizer: optax.GradientTransformation,
+        critic_optimizer: optax.GradientTransformation,
+        value_optimizer: optax.GradientTransformation,
         discount: float = 0.99,
         tau: float = 0.005,
         expectile: float = 0.8,
         temperature: float = 0.1,
-        max_steps: Optional[int] = None,
-        opt_decay_schedule: str = "cosine",
+        counter=None,
+        logger=None,
     ):
-
-        if opt_decay_schedule == "cosine":
-            schedule_fn = optax.cosine_decay_schedule(-actor_lr, max_steps)
-            policy_optimizer = optax.chain(
-                optax.scale_by_adam(),
-                optax.scale_by_schedule(schedule_fn),
-            )
-        else:
-            policy_optimizer = optax.adam(learning_rate=actor_lr)
-        value_optimizer = optax.adam(learning_rate=value_lr)
-        critic_optimizer = optax.adam(learning_rate=critic_lr)
 
         policy_network = networks.policy_network
         value_network = networks.value_network
@@ -78,33 +74,30 @@ class Learner:
                 target_critic_params=critic_params,
                 value_params=value_params,
                 value_opt_state=value_opt_state,
+                steps=0,
             )
             return state
 
         def awr_update_actor(
-            key: PRNGKey,
-            policy_params: Params,
+            policy_params: networks_lib.Params,
             policy_opt_state: optax.OptState,
-            target_critic_params: Params,
-            value_params: Params,
-            batch: Batch,
+            target_critic_params: networks_lib.Params,
+            value_params: networks_lib.Params,
+            batch: core_types.Transition,
         ):
-            v = value_network.apply(value_params, batch.observations)
+            v = value_network.apply(value_params, batch.observation)
             q1, q2 = critic_network.apply(
-                target_critic_params, batch.observations, batch.actions
+                target_critic_params, batch.observation, batch.action
             )
             q = jnp.minimum(q1, q2)
             exp_a = jnp.exp((q - v) * temperature)
             exp_a = jnp.minimum(exp_a, 100.0)
 
-            def actor_loss_fn(policy_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
-                dist = policy_network.apply(
-                    policy_params,
-                    batch.observations,
-                    training=True,
-                    rngs={"dropout": key},
-                )
-                log_probs = dist.log_prob(batch.actions)
+            def actor_loss_fn(
+                policy_params: networks_lib.Params,
+            ) -> Tuple[jnp.ndarray, Any]:
+                dist = policy_network.apply(policy_params, batch.observation)
+                log_probs = dist.log_prob(batch.action)
                 actor_loss = -(exp_a * log_probs).mean()
 
                 return actor_loss, {"actor_loss": actor_loss, "adv": q - v}
@@ -125,19 +118,20 @@ class Learner:
             return new_target_params
 
         def update_v(
-            value_params: Params,
-            value_opt_state: Params,
-            target_critic_params: Params,
-            batch: Batch,
+            value_params: networks_lib.Params,
+            value_opt_state: optax.OptState,
+            target_critic_params: networks_lib.Params,
+            batch: core_types.Transition,
         ):
-            actions = batch.actions
             q1, q2 = critic_network.apply(
-                target_critic_params, batch.observations, actions
+                target_critic_params, batch.observation, batch.action
             )
             q = jnp.minimum(q1, q2)
 
-            def value_loss_fn(value_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
-                v = value_network.apply(value_params, batch.observations)
+            def value_loss_fn(
+                value_params: networks_lib.Params,
+            ) -> Tuple[jnp.ndarray, Any]:
+                v = value_network.apply(value_params, batch.observation)
                 value_loss = expectile_loss(q - v, expectile).mean()
                 return value_loss, {
                     "value_loss": value_loss,
@@ -152,18 +146,20 @@ class Learner:
             return value_params, value_opt_state, info
 
         def update_q(
-            critic_params: Params,
+            critic_params: networks_lib.Params,
             critic_opt_state: optax.OptState,
-            target_value_params: Params,
-            batch: Batch,
+            target_value_params: networks_lib.Params,
+            batch: core_types.Transition,
         ):
-            next_v = value_network.apply(target_value_params, batch.next_observations)
+            next_v = value_network.apply(target_value_params, batch.next_observation)
 
-            target_q = batch.rewards + discount * batch.masks * next_v
+            target_q = batch.reward + discount * batch.discount * next_v
 
-            def critic_loss_fn(critic_params: Params) -> Tuple[jnp.ndarray, InfoDict]:
+            def critic_loss_fn(
+                critic_params: networks_lib.Params,
+            ) -> Tuple[jnp.ndarray, Any]:
                 q1, q2 = critic_network.apply(
-                    critic_params, batch.observations, batch.actions
+                    critic_params, batch.observation, batch.action
                 )
                 critic_loss = ((q1 - target_q) ** 2 + (q2 - target_q) ** 2).mean()
                 return critic_loss, {
@@ -180,17 +176,15 @@ class Learner:
             return critic_params, critic_opt_state, info
 
         def _update_step(
-            rng: PRNGKey, state: TrainingState, batch: Batch
-        ) -> Tuple[PRNGKey, TrainingState, InfoDict]:
+            state: TrainingState, batch: core_types.Transition
+        ) -> Tuple[TrainingState, _Metrics]:
             value_params, value_opt_state, value_info = update_v(
                 state.value_params,
                 state.value_opt_state,
                 state.target_critic_params,
                 batch,
             )
-            key, rng = jax.random.split(rng)
             policy_params, policy_opt_state, actor_info = awr_update_actor(
-                key,
                 state.policy_params,
                 state.policy_opt_state,
                 state.target_critic_params,
@@ -213,21 +207,38 @@ class Learner:
                 value_params=value_params,
                 value_opt_state=value_opt_state,
                 target_critic_params=target_critic_params,
+                steps=state.steps + 1,
             )
-            return rng, state, {**critic_info, **value_info, **actor_info}
+            return state, {**critic_info, **value_info, **actor_info}
 
         self._update_step = jax.jit(_update_step)
-        random_key, init_key = jax.random.split(jax.random.PRNGKey(seed))
-        self._state = make_initial_state(init_key)
-        self.rng = random_key
+        self._state = make_initial_state(random_key)
+        self._iterator = dataset
+        self._logger = logger or loggers.make_default_logger("learner", save_data=False)
+        self._counter = counter or counting.Counter()
+        self._timestamp = None
 
-    def update(self, batch: Batch) -> InfoDict:
-        self.rng, self._state, info = self._update_step(self.rng, self._state, batch)
-        return info
+    def step(self):
+        # Get data from replay
+        sample = next(self._iterator)
+        transitions: types.Transition = sample.data
+        # Perform a single learner step
+        self._state, metrics = self._update_step(self._state, transitions)
+
+        # Compute elapsed time
+        timestamp = time.time()
+        elapsed_time = timestamp - self._timestamp if self._timestamp else 0
+        self._timestamp = timestamp
+
+        # Increment counts and record the current time
+        counts = self._counter.increment(steps=1, walltime=elapsed_time)
+        # Attempts to write the logs.
+        self._logger.write({**metrics, **counts})
 
     def get_variables(self, names):
         variables = {
             "policy": self._state.policy_params,
+            "critic": self._state.critic_params,
         }
         return [variables[name] for name in names]
 
