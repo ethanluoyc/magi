@@ -77,6 +77,106 @@ class IQLLearner(acme.Learner):
         value_network = networks.value_network
         critic_network = networks.critic_network
 
+        def awr_actor_loss_fn(
+            policy_params: networks_lib.Params,
+            target_critic_params: networks_lib.Params,
+            value_params: networks_lib.Params,
+            batch: core_types.Transition,
+        ) -> Tuple[jnp.ndarray, Any]:
+            v = value_network.apply(value_params, batch.observation)
+            q1, q2 = critic_network.apply(
+                target_critic_params, batch.observation, batch.action
+            )
+            q = jnp.minimum(q1, q2)
+            exp_a = jnp.exp((q - v) * temperature)
+            exp_a = jnp.minimum(exp_a, 100.0)
+            dist = policy_network.apply(policy_params, batch.observation)
+            log_probs = dist.log_prob(batch.action)
+            actor_loss = -(exp_a * log_probs).mean()
+
+            return actor_loss, {"actor_loss": actor_loss, "advantage": jnp.mean(q - v)}
+
+        def value_loss_fn(
+            value_params: networks_lib.Params,
+            target_critic_params: networks_lib.Params,
+            batch: core_types.Transition,
+        ) -> Tuple[jnp.ndarray, Any]:
+            q1, q2 = critic_network.apply(
+                target_critic_params, batch.observation, batch.action
+            )
+            q = jnp.minimum(q1, q2)
+            v = value_network.apply(value_params, batch.observation)
+            value_loss = expectile_loss(q - v, expectile).mean()
+            return value_loss, {"value_loss": value_loss, "value": v.mean()}
+
+        def critic_loss_fn(
+            critic_params: networks_lib.Params,
+            target_value_params: networks_lib.Params,
+            batch: core_types.Transition,
+        ) -> Tuple[jnp.ndarray, Any]:
+            next_v = value_network.apply(target_value_params, batch.next_observation)
+            target_q = batch.reward + discount * batch.discount * next_v
+            q1, q2 = critic_network.apply(
+                critic_params, batch.observation, batch.action
+            )
+            critic_loss = ((q1 - target_q) ** 2 + (q2 - target_q) ** 2).mean()
+            return critic_loss, {
+                "critic_loss": critic_loss,
+                "q1": q1.mean(),
+                "q2": q2.mean(),
+            }
+
+        actor_grad_fn = jax.grad(awr_actor_loss_fn, has_aux=True)
+        value_grad_fn = jax.grad(value_loss_fn, has_aux=True)
+        critic_grad_fn = jax.grad(critic_loss_fn, has_aux=True)
+
+        def update_step(
+            state: TrainingState, batch: core_types.Transition
+        ) -> Tuple[TrainingState, _Metrics]:
+            # Update value network first
+            value_grads, value_metrics = value_grad_fn(
+                state.value_params, state.target_critic_params, batch
+            )
+            value_updates, value_opt_state = value_optimizer.update(
+                value_grads, state.value_opt_state
+            )
+            value_params = optax.apply_updates(state.value_params, value_updates)
+            # Update policy network
+            policy_grads, policy_metrics = actor_grad_fn(
+                state.policy_params, state.target_critic_params, value_params, batch
+            )
+            policy_updates, policy_opt_state = policy_optimizer.update(
+                policy_grads, state.policy_opt_state
+            )
+            policy_params = optax.apply_updates(state.policy_params, policy_updates)
+            # Update critic network
+            critic_grads, critic_metrics = critic_grad_fn(
+                state.critic_params, value_params, batch
+            )
+            critic_updates, critic_opt_state = critic_optimizer.update(
+                critic_grads, state.critic_opt_state
+            )
+            critic_params = optax.apply_updates(state.critic_params, critic_updates)
+
+            target_critic_params = jax.tree_multimap(
+                lambda p, tp: p * tau + tp * (1 - tau),
+                critic_params,
+                state.target_critic_params,
+            )
+            state = TrainingState(
+                policy_params=policy_params,
+                policy_opt_state=policy_opt_state,
+                critic_params=critic_params,
+                critic_opt_state=critic_opt_state,
+                value_params=value_params,
+                value_opt_state=value_opt_state,
+                target_critic_params=target_critic_params,
+                steps=state.steps + 1,
+            )
+            return state, {**critic_metrics, **value_metrics, **policy_metrics}
+
+        self._update_step = jax.jit(update_step)
+
         def make_initial_state(key):
             policy_key, critic_key, value_key = jax.random.split(key, 3)
             policy_params = policy_network.init(policy_key)
@@ -97,140 +197,6 @@ class IQLLearner(acme.Learner):
             )
             return state
 
-        def awr_update_actor(
-            policy_params: networks_lib.Params,
-            policy_opt_state: optax.OptState,
-            target_critic_params: networks_lib.Params,
-            value_params: networks_lib.Params,
-            batch: core_types.Transition,
-        ):
-            v = value_network.apply(value_params, batch.observation)
-            q1, q2 = critic_network.apply(
-                target_critic_params, batch.observation, batch.action
-            )
-            q = jnp.minimum(q1, q2)
-            exp_a = jnp.exp((q - v) * temperature)
-            exp_a = jnp.minimum(exp_a, 100.0)
-
-            def actor_loss_fn(
-                policy_params: networks_lib.Params,
-            ) -> Tuple[jnp.ndarray, Any]:
-                dist = policy_network.apply(policy_params, batch.observation)
-                log_probs = dist.log_prob(batch.action)
-                actor_loss = -(exp_a * log_probs).mean()
-
-                return actor_loss, {"actor_loss": actor_loss, "adv": q - v}
-
-            grads, info = jax.grad(actor_loss_fn, has_aux=True)(policy_params)
-            updates, policy_opt_state = policy_optimizer.update(
-                grads, policy_opt_state, policy_params
-            )
-            policy_params = optax.apply_updates(policy_params, updates)
-            return policy_params, policy_opt_state, info
-
-        def target_update(critic_params, target_critic_params):
-            new_target_params = jax.tree_multimap(
-                lambda p, tp: p * tau + tp * (1 - tau),
-                critic_params,
-                target_critic_params,
-            )
-            return new_target_params
-
-        def update_v(
-            value_params: networks_lib.Params,
-            value_opt_state: optax.OptState,
-            target_critic_params: networks_lib.Params,
-            batch: core_types.Transition,
-        ):
-            q1, q2 = critic_network.apply(
-                target_critic_params, batch.observation, batch.action
-            )
-            q = jnp.minimum(q1, q2)
-
-            def value_loss_fn(
-                value_params: networks_lib.Params,
-            ) -> Tuple[jnp.ndarray, Any]:
-                v = value_network.apply(value_params, batch.observation)
-                value_loss = expectile_loss(q - v, expectile).mean()
-                return value_loss, {
-                    "value_loss": value_loss,
-                    "v": v.mean(),
-                }
-
-            grads, info = jax.grad(value_loss_fn, has_aux=True)(value_params)
-            updates, value_opt_state = value_optimizer.update(
-                grads, value_opt_state, value_params
-            )
-            value_params = optax.apply_updates(value_params, updates)
-            return value_params, value_opt_state, info
-
-        def update_q(
-            critic_params: networks_lib.Params,
-            critic_opt_state: optax.OptState,
-            target_value_params: networks_lib.Params,
-            batch: core_types.Transition,
-        ):
-            next_v = value_network.apply(target_value_params, batch.next_observation)
-
-            target_q = batch.reward + discount * batch.discount * next_v
-
-            def critic_loss_fn(
-                critic_params: networks_lib.Params,
-            ) -> Tuple[jnp.ndarray, Any]:
-                q1, q2 = critic_network.apply(
-                    critic_params, batch.observation, batch.action
-                )
-                critic_loss = ((q1 - target_q) ** 2 + (q2 - target_q) ** 2).mean()
-                return critic_loss, {
-                    "critic_loss": critic_loss,
-                    "q1": q1.mean(),
-                    "q2": q2.mean(),
-                }
-
-            grads, info = jax.grad(critic_loss_fn, has_aux=True)(critic_params)
-            updates, critic_opt_state = critic_optimizer.update(
-                grads, critic_opt_state, critic_params
-            )
-            critic_params = optax.apply_updates(critic_params, updates)
-            return critic_params, critic_opt_state, info
-
-        def _update_step(
-            state: TrainingState, batch: core_types.Transition
-        ) -> Tuple[TrainingState, _Metrics]:
-            value_params, value_opt_state, value_info = update_v(
-                state.value_params,
-                state.value_opt_state,
-                state.target_critic_params,
-                batch,
-            )
-            policy_params, policy_opt_state, actor_info = awr_update_actor(
-                state.policy_params,
-                state.policy_opt_state,
-                state.target_critic_params,
-                value_params,
-                batch,
-            )
-
-            critic_params, critic_opt_state, critic_info = update_q(
-                state.critic_params, state.critic_opt_state, value_params, batch
-            )
-
-            target_critic_params = target_update(
-                critic_params, state.target_critic_params
-            )
-            state = TrainingState(
-                policy_params=policy_params,
-                policy_opt_state=policy_opt_state,
-                critic_params=critic_params,
-                critic_opt_state=critic_opt_state,
-                value_params=value_params,
-                value_opt_state=value_opt_state,
-                target_critic_params=target_critic_params,
-                steps=state.steps + 1,
-            )
-            return state, {**critic_info, **value_info, **actor_info}
-
-        self._update_step = jax.jit(_update_step)
         self._state = make_initial_state(random_key)
         self._iterator = dataset
         self._logger = logger or loggers.make_default_logger("learner", save_data=False)
