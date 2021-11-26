@@ -2,7 +2,6 @@ from acme import types
 import d4rl
 import gym
 import numpy as np
-import reverb
 from tqdm import tqdm
 
 
@@ -76,15 +75,12 @@ class Dataset(object):
 
     def sample(self, batch_size: int) -> types.Transition:
         indx = np.random.randint(self.size, size=batch_size)
-        return reverb.ReplaySample(
-            info=None,
-            data=types.Transition(
-                observation=self.observations[indx],
-                action=self.actions[indx],
-                reward=self.rewards[indx],
-                discount=self.masks[indx],
-                next_observation=self.next_observations[indx],
-            ),
+        return types.Transition(
+            observation=self.observations[indx],
+            action=self.actions[indx],
+            reward=self.rewards[indx],
+            discount=self.masks[indx],
+            next_observation=self.next_observations[indx],
         )
 
 

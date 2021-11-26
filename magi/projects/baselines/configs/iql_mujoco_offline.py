@@ -30,5 +30,6 @@ def get_config():
     config.dropout_rate = 0.1
 
     config.tau = 0.005  # For soft target updates.
+    config.log_to_wandb = False
 
     return config

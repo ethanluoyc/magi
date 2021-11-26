@@ -1,135 +1,137 @@
 """Run Offline IQL learning."""
-import os
-from typing import Tuple
+from typing import Sequence
 
-from absl import app
-from absl import flags
-from absl import logging
 from acme import specs
-from acme import wrappers
 from acme.agents.jax import actor_core
 from acme.agents.jax import actors
+from acme.jax import networks as networks_lib
+from acme.jax import utils as jax_utils
 from acme.jax import variable_utils
+from acme.jax.networks import distributional
 from acme.utils import counting
-import gym
+import haiku as hk
 import jax
+import jax.numpy as jnp
 import ml_collections
-from ml_collections import config_flags
 import numpy as np
 import optax
-import yaml
+import tensorflow_probability
 
 from magi.agents import cql
 from magi.agents import sac
-from magi.projects.baselines import dataset_utils
+from magi.projects.baselines import experiment
 from magi.projects.baselines import logger_utils
 
-config_flags.DEFINE_config_file("config", default="configs/cql_antmaze_offline.py")
-flags.DEFINE_string("workdir", "./tmp", "Where to save results")
-flags.DEFINE_bool("log_to_wandb", False, "If true, log to WandB")
+hk_init = hk.initializers
+tfp = tensorflow_probability.substrates.jax
+tfd = tfp.distributions
 
-FLAGS = flags.FLAGS
-
-
-def evaluate(actor, environment, eval_episodes=10):
-    actor.update(wait=True)
-    avg_reward = 0.0
-    for _ in range(eval_episodes):
-        timestep = environment.reset()
-        actor.observe_first(timestep)
-        while not timestep.last():
-            action = actor.select_action(timestep.observation)
-            timestep = environment.step(action)
-            actor.observe(action, timestep)
-            avg_reward += timestep.reward
-
-    avg_reward /= eval_episodes
-    d4rl_score = environment.get_normalized_score(avg_reward)
-
-    logging.info("---------------------------------------")
-    logging.info("Evaluation over %d episodes: %.3f", eval_episodes, d4rl_score)
-    logging.info("---------------------------------------")
-    return d4rl_score
+Initializer = hk.initializers.Initializer
 
 
-def normalize(dataset):
+class NormalTanhDistribution(hk.Module):
+    """Module that produces a TanhTransformedDistribution distribution."""
 
-    trajs = dataset_utils.split_into_trajectories(
-        dataset.observations,
-        dataset.actions,
-        dataset.rewards,
-        dataset.masks,
-        dataset.dones_float,
-        dataset.next_observations,
-    )
+    def __init__(
+        self,
+        num_dimensions: int,
+        min_scale: float = 1e-3,
+        w_init: hk_init.Initializer = hk_init.VarianceScaling(1.0, "fan_in", "uniform"),
+        b_init: hk_init.Initializer = hk_init.Constant(0.0),
+    ):
+        """Initialization.
 
-    def compute_returns(traj):
-        episode_return = 0
-        for _, _, rew, _, _, _ in traj:
-            episode_return += rew
+        Args:
+          num_dimensions: Number of dimensions of a distribution.
+          min_scale: Minimum standard deviation.
+          w_init: Initialization for linear layer weights.
+          b_init: Initialization for linear layer biases.
+        """
+        super().__init__(name="Normal")
+        self._min_scale = min_scale
+        self._loc_layer = hk.Linear(num_dimensions, w_init=w_init, b_init=b_init)
+        self._scale_layer = hk.Linear(num_dimensions, w_init=w_init, b_init=b_init)
 
-        return episode_return
-
-    trajs.sort(key=compute_returns)
-
-    dataset.rewards /= compute_returns(trajs[-1]) - compute_returns(trajs[0])
-    dataset.rewards *= 1000.0
-
-
-def _make_dataset_iterator(dataset, batch_size: int):
-    while True:
-        batch = dataset.sample(batch_size)
-        yield batch
-
-
-def make_env_and_dataset(
-    env_name: str, seed: int, batch_size: int
-) -> Tuple[gym.Env, dataset_utils.D4RLDataset]:
-    env = gym.make(env_name)
-    env.seed(seed)
-    env = wrappers.wrap_all(
-        env,
-        [
-            wrappers.GymWrapper,
-            wrappers.SinglePrecisionWrapper,
-        ],
-    )
-
-    dataset = dataset_utils.D4RLDataset(env)
-
-    if "antmaze" in env_name:
-        dataset.rewards -= (dataset.rewards - 0.5) * 4.0
-    elif "halfcheetah" in env_name or "walker2d" in env_name or "hopper" in env_name:
-        normalize(dataset)
-
-    return env, _make_dataset_iterator(dataset, batch_size)
+    def __call__(self, inputs: jnp.ndarray) -> tfd.Distribution:
+        loc = self._loc_layer(inputs)
+        scale = self._scale_layer(inputs)
+        scale = jnp.exp(jnp.clip(scale, -20.0, 2.0))
+        distribution = tfd.Normal(loc=loc, scale=scale)
+        return tfd.Independent(
+            distributional.TanhTransformedDistribution(distribution),
+            reinterpreted_batch_ndims=1,
+        )
 
 
-def main(_):
-    config: ml_collections.ConfigDict = FLAGS.config
-    workdir = FLAGS.workdir
-    log_to_wandb = FLAGS.log_to_wandb
-    # Fix global random seed
-    np.random.seed(config.seed)
+def make_networks(
+    spec: specs.EnvironmentSpec,
+    policy_layer_sizes: Sequence[int] = (256, 256),
+    critic_layer_sizes: Sequence[int] = (256, 256),
+):
+    num_dimensions = np.prod(spec.actions.shape, dtype=int)
 
-    # Create working directory
-    os.makedirs(workdir, exist_ok=True)
+    def _actor_fn(obs):
+        network = hk.Sequential(
+            [
+                hk.nets.MLP(
+                    list(policy_layer_sizes),
+                    w_init=hk.initializers.VarianceScaling(1.0, "fan_in", "uniform"),
+                    activation=jax.nn.relu,
+                    activate_final=True,
+                ),
+                NormalTanhDistribution(num_dimensions),
+            ]
+        )
+        return network(obs)
 
-    # Save configuration
-    with open(os.path.join(workdir, "config.yaml"), "wt") as f:
-        yaml.dump(config.to_dict(), f)
+    def _critic_fn(obs, action):
+        network1 = hk.nets.MLP(
+            list(critic_layer_sizes) + [1],
+            w_init=hk.initializers.VarianceScaling(1.0, "fan_in", "uniform"),
+            activation=jax.nn.relu,
+            activate_final=False,
+        )
+        network2 = hk.nets.MLP(
+            list(critic_layer_sizes) + [1],
+            w_init=hk.initializers.VarianceScaling(1.0, "fan_in", "uniform"),
+            activation=jax.nn.relu,
+            activate_final=False,
+        )
+        input_ = jnp.concatenate([obs, action], axis=-1)
+        value1 = network1(input_)
+        value2 = network2(input_)
+        return jnp.squeeze(value1, axis=-1), jnp.squeeze(value2, axis=-1)
 
+    dummy_action = jax_utils.zeros_like(spec.actions)
+    dummy_obs = jax_utils.zeros_like(spec.observations)
+    dummy_action = jax_utils.add_batch_dim(dummy_action)
+    dummy_obs = jax_utils.add_batch_dim(dummy_obs)
+
+    policy = hk.without_apply_rng(hk.transform(_actor_fn, apply_rng=True))
+    critic = hk.without_apply_rng(hk.transform(_critic_fn, apply_rng=True))
+
+    return {
+        "policy": networks_lib.FeedForwardNetwork(
+            lambda key: policy.init(key, dummy_obs), policy.apply
+        ),
+        "critic": networks_lib.FeedForwardNetwork(
+            lambda key: critic.init(key, dummy_obs, dummy_action), critic.apply
+        ),
+    }
+
+
+def main(config: ml_collections.ConfigDict, workdir: str):
     # Create dataset and environment
-    environment, dataset = make_env_and_dataset(
+    environment, dataset = experiment.make_env_and_dataset(
         config.env_name, config.seed, config.batch_size
     )
 
     # Setup learner and evaluator
     spec = specs.make_environment_spec(environment)
-    agent_networks = sac.make_networks(
+    agent_networks = make_networks(
         spec,
-        policy_layer_sizes=config.hidden_dims,
-        critic_layer_sizes=config.hidden_dims,
+        policy_layer_sizes=config.policy_dims,
+        critic_layer_sizes=config.critic_dims,
     )
     random_key = jax.random.PRNGKey(config.seed)
     learner_key, evaluator_key = jax.random.split(random_key)
@@ -138,7 +140,7 @@ def main(_):
         workdir,
         "evaluation",
         save_data=True,
-        log_to_wandb=log_to_wandb,
+        log_to_wandb=config.log_to_wandb,
     )
     learner = cql.CQLLearner(
         agent_networks["policy"],
@@ -152,27 +154,25 @@ def main(_):
         discount=config.discount,
         tau=config.tau,
         init_alpha=config.init_alpha,
-        policy_eval_start=config.policy_eval_start,
-        temp=config.temp,
-        init_alpha_prime=config.init_alpha_prime,
+        num_bc_steps=config.num_bc_steps,
+        softmax_temperature=config.softmax_temperature,
+        cql_alpha=config.cql_alpha,
         max_q_backup=config.max_q_backup,
         deterministic_backup=config.deterministic_backup,
-        num_random=config.num_random,
+        num_cql_samples=config.num_cql_samples,
         with_lagrange=config.with_lagrange,
-        lagrange_thresh=config.lagrange_thresh,
+        target_action_gap=config.target_action_gap,
         counter=counting.Counter(counter, prefix="learner", time_delta=0),
         logger=logger_utils.make_default_logger(
             workdir,
             "learner",
             time_delta=5.0,
             save_data=True,
-            log_to_wandb=log_to_wandb,
+            log_to_wandb=config.log_to_wandb,
         ),
     )
 
-    evaluator_network = sac.apply_policy_and_sample(
-        agent_networks, spec.actions, eval_mode=True
-    )
+    evaluator_network = sac.apply_policy_sample(agent_networks, eval_mode=True)
     evaluator = actors.GenericActor(
         actor_core.batched_feed_forward_to_actor_core(evaluator_network),
         random_key=evaluator_key,
@@ -185,10 +185,12 @@ def main(_):
     for _ in range(config.num_steps // config.eval_interval):
         for _ in range(config.eval_interval):
             learner.step()
-        normalized_score = evaluate(evaluator, environment, config.eval_episodes)
+        normalized_score = experiment.evaluate(
+            evaluator, environment, config.eval_episodes
+        )
         counts = counter.increment(steps=config.eval_interval)
         eval_logger.write({"normalized_score": normalized_score, **counts})
 
 
 if __name__ == "__main__":
-    app.run(main)
+    experiment.run(main)

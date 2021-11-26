@@ -25,18 +25,18 @@ class CQLTest(absltest.TestCase):
             policy_network=agent_networks["policy"],
             critic_network=agent_networks["critic"],
             random_key=jax.random.PRNGKey(0),
-            dataset=fakes.transition_dataset(environment).batch(2).as_numpy_iterator(),
+            dataset=fakes.transition_iterator(environment)(2),
             policy_optimizer=optax.adam(1e-4),
             critic_optimizer=optax.adam(1e-4),
             alpha_optimizer=optax.adam(1e-4),
             target_entropy=sac.target_entropy_from_env_spec(environment_spec),
-            init_alpha_prime=1.0,
-            policy_eval_start=0,
+            num_bc_steps=0,
             with_lagrange=True,
-            lagrange_thresh=0.0,
+            target_action_gap=0.0,
+            cql_alpha=5.0,
             max_q_backup=False,
             deterministic_backup=True,
-            num_random=2,
+            num_cql_samples=2,
         )
         learner.step()
 

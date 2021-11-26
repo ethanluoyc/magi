@@ -17,7 +17,7 @@ class IQLAgentTest(absltest.TestCase):
         spec = specs.make_environment_spec(environment)
         # # Try running the environment loop. We have no assertions here because all
         agent_networks = networks.make_networks(spec, (10, 10), dropout_rate=0.1)
-        dataset = fakes.transition_dataset(environment).batch(10).as_numpy_iterator()
+        dataset = fakes.transition_iterator(environment)(2)
         learner = learning.IQLLearner(
             random_key=jax.random.PRNGKey(0),
             networks=agent_networks,

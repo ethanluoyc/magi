@@ -214,8 +214,7 @@ class IQLLearner(acme.Learner):
 
     def step(self):
         # Get data from replay
-        sample = next(self._iterator)
-        transitions: types.Transition = sample.data
+        transitions = next(self._iterator)
         # Perform a single learner step
         self._state, metrics = self._update_step(self._state, transitions)
 
