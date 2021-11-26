@@ -25,6 +25,7 @@ class TrainingState(NamedTuple):
     critic_params: networks_lib.Params
     critic_opt_state: optax.OptState
     target_critic_params: networks_lib.Params
+    key: types.PRNGKey
     steps: int
 
 
@@ -79,6 +80,7 @@ class IQLLearner(acme.Learner):
 
         def awr_actor_loss_fn(
             policy_params: networks_lib.Params,
+            key: types.PRNGKey,
             target_critic_params: networks_lib.Params,
             value_params: networks_lib.Params,
             batch: core_types.Transition,
@@ -90,7 +92,7 @@ class IQLLearner(acme.Learner):
             q = jnp.minimum(q1, q2)
             exp_a = jnp.exp((q - v) * temperature)
             exp_a = jnp.minimum(exp_a, 100.0)
-            dist = policy_network.apply(policy_params, batch.observation)
+            dist = policy_network.apply(policy_params, batch.observation, True, key)
             log_probs = dist.log_prob(batch.action)
             actor_loss = -(exp_a * log_probs).mean()
 
@@ -134,6 +136,7 @@ class IQLLearner(acme.Learner):
             state: TrainingState, batch: core_types.Transition
         ) -> Tuple[TrainingState, _Metrics]:
             # Update value network first
+            policy_key, key = jax.random.split(state.key)
             value_grads, value_metrics = value_grad_fn(
                 state.value_params, state.target_critic_params, batch
             )
@@ -143,7 +146,11 @@ class IQLLearner(acme.Learner):
             value_params = optax.apply_updates(state.value_params, value_updates)
             # Update policy network
             policy_grads, policy_metrics = actor_grad_fn(
-                state.policy_params, state.target_critic_params, value_params, batch
+                state.policy_params,
+                policy_key,
+                state.target_critic_params,
+                value_params,
+                batch,
             )
             policy_updates, policy_opt_state = policy_optimizer.update(
                 policy_grads, state.policy_opt_state
@@ -171,6 +178,7 @@ class IQLLearner(acme.Learner):
                 value_params=value_params,
                 value_opt_state=value_opt_state,
                 target_critic_params=target_critic_params,
+                key=key,
                 steps=state.steps + 1,
             )
             return state, {**critic_metrics, **value_metrics, **policy_metrics}
@@ -178,7 +186,7 @@ class IQLLearner(acme.Learner):
         self._update_step = jax.jit(update_step)
 
         def make_initial_state(key):
-            policy_key, critic_key, value_key = jax.random.split(key, 3)
+            policy_key, critic_key, value_key, key = jax.random.split(key, 4)
             policy_params = policy_network.init(policy_key)
             policy_opt_state = policy_optimizer.init(policy_params)
             critic_params = critic_network.init(critic_key)
@@ -193,6 +201,7 @@ class IQLLearner(acme.Learner):
                 target_critic_params=critic_params,
                 value_params=value_params,
                 value_opt_state=value_opt_state,
+                key=key,
                 steps=0,
             )
             return state

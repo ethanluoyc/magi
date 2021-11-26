@@ -125,7 +125,11 @@ def main(_):
 
     # Setup learner and evaluator
     spec = specs.make_environment_spec(environment)
-    agent_networks = iql.make_networks(spec, hidden_dims=config.hidden_dims)
+    agent_networks = iql.make_networks(
+        spec,
+        hidden_dims=config.hidden_dims,
+        dropout_rate=config.dropout_rate,
+    )
     random_key = jax.random.PRNGKey(config.seed)
     learner_key, evaluator_key = jax.random.split(random_key)
     counter = counting.Counter(time_delta=0)
