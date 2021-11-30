@@ -12,7 +12,7 @@ def get_config():
     config.value_lr = 3e-4
     config.critic_lr = 3e-4
 
-    config.policy_dims = (256, 256)
+    config.policy_dims = (256, 256, 256)
     config.critic_dims = (256, 256, 256)
 
     config.discount = 0.99

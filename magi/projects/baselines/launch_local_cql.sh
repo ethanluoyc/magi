@@ -11,7 +11,7 @@ for env in antmaze-medium-play-v0 antmaze-umaze-v0 antmaze-umaze-diverse-v0 antm
     python magi/projects/baselines/offline_cql.py \
         --config magi/projects/baselines/configs/cql_antmaze_offline.py \
         --config.env_name=$env \
-        --config.eval_episodes=100 \
+        --config.eval_episodes=50 \
         --config.eval_interval=10000 \
         --config.log_to_wandb \
         --config.seed $seed \

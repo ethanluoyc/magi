@@ -24,9 +24,9 @@ class TrainingState(NamedTuple):
     policy_optimizer_state: optax.OptState
     critic_optimizer_state: optax.OptState
     alpha_optimizer_state: optax.OptState
-    log_alpha: jnp.ndarray
+    alpha_params: jnp.ndarray
     alpha_prime_optimizer_state: Optional[optax.OptState]
-    log_alpha_prime: Optional[jnp.ndarray]
+    alpha_prime_params: Optional[jnp.ndarray]
     key: networks_lib.PRNGKey
     steps: int
 
@@ -126,7 +126,7 @@ class CQLLearner(core.Learner):
 
         def critic_loss_fn(
             critic_params: networks_lib.Params,
-            log_alpha_prime: jnp.ndarray,
+            alpha_prime_params: jnp.ndarray,
             critic_target_params: networks_lib.Params,
             policy_params: networks_lib.Params,
             key: networks_lib.PRNGKey,
@@ -176,6 +176,7 @@ class CQLLearner(core.Learner):
             q_target = (
                 transitions.reward + transitions.discount * discount * target_q_values
             )
+            assert len(q_target.shape) == 1
             q_target = jax.lax.stop_gradient(q_target)
             qf1_loss = jnp.mean(jnp.square(q1_pred - q_target))
             qf2_loss = jnp.mean(jnp.square(q2_pred - q_target))
@@ -192,61 +193,56 @@ class CQLLearner(core.Learner):
             # Sample actions from uniform-at-random distribution
             # (N, B, A)
             uniform_key, policy_key, key = jax.random.split(key, 3)
-            cql_random_actions = jax.random.uniform(
+            uniform_actions = jax.random.uniform(
                 uniform_key,
                 shape=(num_cql_samples, batch_size, action_size),
                 dtype=transitions.action.dtype,
                 maxval=1.0,
                 minval=-1.0,
             )
-            cql_random_log_probs = jnp.log(0.5 ** action_size)
+            uniform_log_probs = jnp.log(0.5 ** action_size)
             # Compute the q values for the uniform actions
             # Sample actions from the policy
-            cql_current_actions, cql_current_log_probs = sample_action_and_log_prob(
+            q_uniform1, q_uniform2 = vmapped_critic_apply(
+                critic_params, transitions.observation, uniform_actions
+            )
+            uniform_log_probs1 = q_uniform1 * softmax_temperature - uniform_log_probs
+            uniform_log_probs2 = q_uniform2 * softmax_temperature - uniform_log_probs
+            sampled_actions, sampled_actions_log_probs = sample_action_and_log_prob(
                 policy_params, policy_key, transitions.observation, (num_cql_samples,)
             )
-            cql_q1_random, cql_q2_random = vmapped_critic_apply(
-                critic_params, transitions.observation, cql_random_actions
+            q_estimate1, q_estimate2 = vmapped_critic_apply(
+                critic_params, transitions.observation, sampled_actions
             )
-            cql_q1_current_actions, cql_q2_current_actions = vmapped_critic_apply(
-                critic_params, transitions.observation, cql_current_actions
+            policy_log_probs1 = (
+                q_estimate1 * softmax_temperature - sampled_actions_log_probs
             )
-
-            # Perform importance sampling
-            cat_q1 = jnp.concatenate(
-                [
-                    cql_q1_random - cql_random_log_probs,
-                    cql_q1_current_actions - cql_current_log_probs,
-                ],
-                axis=0,
+            policy_log_probs2 = (
+                q_estimate2 * softmax_temperature - sampled_actions_log_probs
             )
-            cat_q2 = jnp.concatenate(
-                [
-                    cql_q2_random - cql_random_log_probs,
-                    cql_q2_current_actions - cql_current_log_probs,
-                ],
-                axis=0,
+            combined_log_probs1 = jnp.concatenate(
+                [policy_log_probs1, uniform_log_probs1], axis=0
+            )
+            combined_log_probs2 = jnp.concatenate(
+                [policy_log_probs2, uniform_log_probs2], axis=0
             )
 
             logsumexp = jsp.special.logsumexp
-
-            logsumexp_q1 = (
-                logsumexp(cat_q1 / softmax_temperature, axis=0) * softmax_temperature
+            logsumexp1 = (
+                logsumexp(combined_log_probs1, axis=0) * 1.0 / softmax_temperature
             )
-            logsumexp_q2 = (
-                logsumexp(cat_q2 / softmax_temperature, axis=0) * softmax_temperature
+            logsumexp2 = (
+                logsumexp(combined_log_probs2, axis=0) * 1.0 / softmax_temperature
             )
-            cql_q1_loss = jnp.mean(logsumexp_q1 - q1_pred)
-            cql_q2_loss = jnp.mean(logsumexp_q2 - q2_pred)
-            cql_loss = cql_q1_loss + cql_q2_loss
-            alpha_prime = jnp.clip(jnp.exp(log_alpha_prime), 0.0, 10000.0)
+            cql_loss = jnp.mean((logsumexp1 - q1_pred) + (logsumexp2 - q2_pred))
+            alpha_prime = jnp.clip(jnp.exp(alpha_prime_params), 0.0, 10000.0)
             metrics = {
                 "qf_loss": qf_loss,
                 "cql_loss": cql_loss,
                 "q1": jnp.mean(q1_pred),
                 "q2": jnp.mean(q2_pred),
-                "q1_random": jnp.mean(cql_q1_random),
-                "q2_random": jnp.mean(cql_q2_random),
+                "q1_uniform": jnp.mean(q_uniform1),
+                "q2_uniform": jnp.mean(q_uniform2),
             }
             return qf_loss + alpha_prime * cql_loss, metrics
 
@@ -254,10 +250,10 @@ class CQLLearner(core.Learner):
             policy_params: networks_lib.Params,
             critic_params: networks_lib.Params,
             key: networks_lib.PRNGKey,
-            log_alpha: jnp.ndarray,
+            alpha_params: jnp.ndarray,
             observation: jnp.ndarray,
         ):
-            alpha = jnp.exp(log_alpha)
+            alpha = jnp.exp(alpha_params)
             action_dist = policy_network.apply(policy_params, observation)
             new_actions = action_dist.sample(seed=key)
             log_probs = action_dist.log_prob(new_actions)
@@ -270,7 +266,7 @@ class CQLLearner(core.Learner):
         def bc_actor_loss_fn(
             policy_params: networks_lib.Params,
             key: networks_lib.PRNGKey,
-            log_alpha: jnp.ndarray,
+            alpha_params: jnp.ndarray,
             observations: jnp.ndarray,
             actions: jnp.ndarray,
         ):
@@ -279,16 +275,19 @@ class CQLLearner(core.Learner):
             policy_log_prob = action_dist.log_prob(actions)
             new_actions = action_dist.sample(seed=key)
             log_pi = action_dist.log_prob(new_actions)
-            policy_loss = (jnp.exp(log_alpha) * log_pi - policy_log_prob).mean()
+            policy_loss = (jnp.exp(alpha_params) * log_pi - policy_log_prob).mean()
             return policy_loss, {"entropy": -log_pi.mean()}
 
-        def alpha_loss_fn(log_alpha: jnp.ndarray, entropy: jnp.ndarray):
+        def alpha_loss_fn(alpha_params: jnp.ndarray, entropy: jnp.ndarray):
             # Use log_alpha here for numerical stability
-            return log_alpha * (entropy - target_entropy)
+            return alpha_params * (entropy - target_entropy)
 
-        def alpha_prime_loss_fn(log_alpha_prime: jnp.ndarray, cql_loss: jnp.ndarray):
-            alpha_prime = jnp.clip(jnp.exp(log_alpha_prime), 0.0, 10000.0)
-            return -alpha_prime * (cql_loss - target_action_gap)
+        def alpha_prime_loss_fn(alpha_prime_params: jnp.ndarray, cql_loss: jnp.ndarray):
+            # -alpha' * (cql_q1_loss - tau) + alpha' * (cql_q2_loss - tau)
+            # -alpha' * (cql_q1_loss + cql_q2_loss - 2 * tau)
+            # -alpha' * (cql_loss - 2 * tau)
+            alpha_prime = jnp.clip(jnp.exp(alpha_prime_params), 0.0, 10000.0)
+            return -alpha_prime * (cql_loss - 2 * target_action_gap)
 
         bc_policy_grad_fn = jax.value_and_grad(bc_actor_loss_fn, has_aux=True)
         policy_grad_fn = jax.value_and_grad(actor_loss_fn, has_aux=True)
@@ -297,16 +296,16 @@ class CQLLearner(core.Learner):
         def sgd_step(state: TrainingState, transitions: types.Transition):
             metrics = {}
             # Update critic
-            critic_loss_key, key = jax.random.split(state.key)
+            critic_key, actor_key, key = jax.random.split(state.key, 3)
             (critic_loss, critic_metrics), critic_grads = jax.value_and_grad(
                 critic_loss_fn, has_aux=True
             )(
                 state.critic_params,
-                state.log_alpha_prime,
+                state.alpha_prime_params,
                 state.critic_target_params,
                 state.policy_params,
-                critic_loss_key,
-                state.log_alpha,
+                critic_key,
+                state.alpha_params,
                 transitions,
             )
             metrics.update({"critic_loss": critic_loss, **critic_metrics})
@@ -315,21 +314,20 @@ class CQLLearner(core.Learner):
             )
             critic_params = optax.apply_updates(state.critic_params, critic_updates)
             # Update policy
-            actor_key, key = jax.random.split(key)
             (policy_loss, actor_metrics), policy_grads = jax.lax.cond(
                 state.steps < num_bc_steps,
                 lambda _: bc_policy_grad_fn(
                     state.policy_params,
                     actor_key,
-                    state.log_alpha,
+                    state.alpha_params,
                     transitions.observation,
                     transitions.action,
                 ),
                 lambda _: policy_grad_fn(
                     state.policy_params,
-                    state.critic_params,
+                    critic_params,
                     actor_key,
-                    state.log_alpha,
+                    state.alpha_params,
                     transitions.observation,
                 ),
                 operand=None,
@@ -342,19 +340,19 @@ class CQLLearner(core.Learner):
 
             # Update entropy alpha
             alpha_loss, grad = jax.value_and_grad(alpha_loss_fn)(
-                state.log_alpha, actor_metrics["entropy"]
+                state.alpha_params, actor_metrics["entropy"]
             )
             alpha_update, alpha_optimizer_state = alpha_optimizer.update(
                 grad, state.alpha_optimizer_state
             )
-            log_alpha = optax.apply_updates(state.log_alpha, alpha_update)
-            metrics.update({"alpha_loss": alpha_loss, "alpha": jnp.exp(log_alpha)})
+            alpha_params = optax.apply_updates(state.alpha_params, alpha_update)
+            metrics.update({"alpha_loss": alpha_loss, "alpha": jnp.exp(alpha_params)})
 
             # Update adaptive alpha_prime
             if with_lagrange:
                 alpha_prime_loss, alpha_prime_grads = jax.value_and_grad(
                     alpha_prime_loss_fn
-                )(state.log_alpha_prime, critic_metrics["cql_loss"])
+                )(state.alpha_prime_params, critic_metrics["cql_loss"])
                 # pytype: disable=attribute-error
                 (
                     alpha_prime_updates,
@@ -363,17 +361,17 @@ class CQLLearner(core.Learner):
                     alpha_prime_grads, state.alpha_prime_optimizer_state
                 )
                 # pytype: enable=attribute-error
-                log_alpha_prime = optax.apply_updates(
-                    state.log_alpha_prime, alpha_prime_updates
+                alpha_prime_params = optax.apply_updates(
+                    state.alpha_prime_params, alpha_prime_updates
                 )
                 metrics.update(
                     {
                         "alpha_prime_loss": alpha_prime_loss,
-                        "alpha_prime": jnp.exp(log_alpha_prime),
+                        "alpha_prime": jnp.exp(alpha_prime_params),
                     }
                 )
             else:
-                log_alpha_prime = state.log_alpha_prime
+                alpha_prime_params = state.alpha_prime_params
                 alpha_prime_optimizer_state = None
 
             # Update target network params
@@ -388,9 +386,9 @@ class CQLLearner(core.Learner):
                 policy_optimizer_state=policy_optimizer_state,
                 critic_optimizer_state=critic_optimizer_state,
                 alpha_optimizer_state=alpha_optimizer_state,
-                log_alpha=log_alpha,
+                alpha_params=alpha_params,
                 alpha_prime_optimizer_state=alpha_prime_optimizer_state,
-                log_alpha_prime=log_alpha_prime,
+                alpha_prime_params=alpha_prime_params,
                 key=key,
                 steps=steps,
             )
@@ -410,13 +408,13 @@ class CQLLearner(core.Learner):
             init_critic_params = critic_network.init(init_critic_key)
             init_policy_optimizer_state = policy_optimizer.init(init_policy_params)
             init_critic_optimizer_state = critic_optimizer.init(init_critic_params)
-            init_log_alpha = jnp.array(np.log(init_alpha), dtype=jnp.float32)
-            init_alpha_optimizer_state = alpha_optimizer.init(init_log_alpha)
+            init_alpha_params = jnp.array(np.log(init_alpha), dtype=jnp.float32)
+            init_alpha_optimizer_state = alpha_optimizer.init(init_alpha_params)
 
-            init_log_alpha_prime = jnp.asarray(jnp.log(cql_alpha), dtype=jnp.float32)
+            init_alpha_prime_params = jnp.asarray(jnp.log(cql_alpha), dtype=jnp.float32)
             if alpha_prime_optimizer is not None:
                 init_alpha_prime_optimizer_state = alpha_prime_optimizer.init(
-                    init_log_alpha_prime
+                    init_alpha_prime_params
                 )
             else:
                 init_alpha_prime_optimizer_state = None
@@ -429,8 +427,8 @@ class CQLLearner(core.Learner):
                 critic_optimizer_state=init_critic_optimizer_state,
                 alpha_optimizer_state=init_alpha_optimizer_state,
                 alpha_prime_optimizer_state=init_alpha_prime_optimizer_state,
-                log_alpha=init_log_alpha,
-                log_alpha_prime=init_log_alpha_prime,
+                alpha_params=init_alpha_params,
+                alpha_prime_params=init_alpha_prime_params,
                 key=key,
                 steps=0,
             )
