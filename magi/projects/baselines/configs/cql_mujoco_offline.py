@@ -1,22 +1,9 @@
 """IQL configuration for D4RL mujoco locomotion"""
-import ml_collections
+from magi.projects.baselines import base_config
 
 
 def get_config():
-    config = ml_collections.ConfigDict()
-
-    config.seed = 42
-    config.env_name = "halfcheetah-medium-v2"
-
-    # Number of episodes used for evaluation.
-    config.eval_episodes = 10
-    # Eval interval.
-    config.eval_interval = 5000
-    # Mini batch size.
-    config.batch_size = 256
-    # Number of training steps.
-    config.num_steps = int(1e6)
-
+    config = base_config.get_base_config()
     config.actor_lr = 1e-4
     config.value_lr = 3e-4
     config.critic_lr = 3e-4
@@ -36,8 +23,5 @@ def get_config():
     config.num_cql_samples = 10
     config.with_lagrange = False
     config.target_action_gap = 5.0
-
-    # Logging
-    config.log_to_wandb = False
 
     return config
