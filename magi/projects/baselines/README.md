@@ -1,4 +1,12 @@
 # Baseline results for IQL
+## Setup
+In addition to the core magi requirements. There are additional setup required
+to use the D4RL environments.
+
+```bash
+# Install environment, dataset and logging dependencies.
+pip install -r requirements.txt
+```
 
 ## Mujoco locomotion v2
 

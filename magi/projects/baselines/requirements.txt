@@ -1,0 +1,4 @@
+wandb
+gym[mujoco]>=0.21.0
+mujoco_py>=1.50, <2.0
+d4rl @ git+https://github.com/rail-berkeley/d4rl@master#egg=d4rl
