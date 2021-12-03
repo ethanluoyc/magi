@@ -1,14 +1,14 @@
 """Default networks used by CRR agent."""
 from typing import Dict, NamedTuple, Optional, Sequence, Union
 
-from acme import specs
-from acme.agents.jax import actors
-from acme.jax import networks as networks_lib
-from acme.jax import utils
 import haiku as hk
 import jax.numpy as jnp
 import numpy as np
 import tensorflow_probability.substrates.jax as tfp
+from acme import specs
+from acme.agents.jax import actor_core
+from acme.jax import networks as networks_lib
+from acme.jax import utils
 
 tfd = tfp.distributions
 
@@ -63,7 +63,7 @@ class DiscreteValuedHead(hk.Module):
 def apply_policy_and_sample(
     networks: Dict[str, networks_lib.FeedForwardNetwork],
     eval_mode: bool = False,
-) -> actors.FeedForwardPolicy:
+) -> actor_core.FeedForwardPolicy:
     """Returns a function that computes actions."""
     policy_network = networks["policy"]
 

@@ -6,6 +6,7 @@ from acme import core
 from acme import datasets
 from acme import specs
 from acme.adders import reverb as adders_reverb
+from acme.agents.jax import actor_core
 from acme.agents.jax import actors as acting_lib
 from acme.agents.jax import builders
 from acme.jax import networks as networks_lib
@@ -14,7 +15,6 @@ from acme.jax import variable_utils
 from acme.utils import counting
 from acme.utils import loggers
 import reverb
-from reverb import rate_limiters
 
 from magi.agents.td3 import config as td3_config
 from magi.agents.td3 import learning as learning_lib
@@ -42,7 +42,7 @@ class TD3Builder(builders.ActorLearnerBuilder):
             sampler=reverb.selectors.Uniform(),
             remover=reverb.selectors.Fifo(),
             max_size=self._config.max_replay_size,
-            rate_limiter=rate_limiters.MinSize(self._config.min_replay_size),
+            rate_limiter=reverb.rate_limiters.MinSize(self._config.min_replay_size),
             signature=adders_reverb.NStepTransitionAdder.signature(
                 environment_spec=environment_spec
             ),
@@ -96,8 +96,11 @@ class TD3Builder(builders.ActorLearnerBuilder):
         assert variable_source is not None
         variable_client = variable_utils.VariableClient(variable_source, "policy")
         variable_client.update_and_wait()
-        return acting_lib.FeedForwardActor(
-            policy_network, random_key, variable_client, adder
+        return acting_lib.GenericActor(
+            actor=actor_core.batched_feed_forward_to_actor_core(policy_network),
+            random_key=random_key,
+            variable_client=variable_client,
+            adder=adder,
         )
 
     def make_learner(

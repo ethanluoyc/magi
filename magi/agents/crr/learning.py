@@ -3,10 +3,6 @@ import copy
 from typing import Dict, Iterator, List, NamedTuple, Optional, Sequence, Tuple
 
 import acme
-from acme import types
-from acme.jax import networks as networks_lib
-from acme.utils import counting
-from acme.utils import loggers
 import chex
 import haiku as hk
 import jax
@@ -14,6 +10,9 @@ import jax.numpy as jnp
 import optax
 import reverb
 import rlax
+from acme import types
+from acme.jax import networks as networks_lib
+from acme.utils import counting, loggers
 
 
 class TrainingState(NamedTuple):
