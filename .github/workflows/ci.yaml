@@ -1,9 +1,12 @@
 name: pytest
 
 on:
+  push:
+    branches:
+      main
   pull_request:
     branches:
-      develop
+      main
 
 jobs:
   test-ubuntu:
@@ -27,12 +30,6 @@ jobs:
     - name: Show installed dependencies
       run: |
         pip freeze
-    - name: Check types with pytype
-      run: |
-        make typecheck
-    - name: Style check
-      run: |
-        black --check magi
     - name: Test with pytest
       run: |
         make test
