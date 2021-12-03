@@ -15,6 +15,14 @@ test:
 		--durations=10 \
 		$(SRC)
 
+.PHONY: integration-test
+integration-test:
+	JAX_PLATFORM_NAME=cpu pytest -n $(N_CPUS) \
+		--color=yes \
+		-rf \
+		--durations=10 \
+		$(SRC)
+
 .PHONY: isort
 isort:
 	isort $(SRC)
