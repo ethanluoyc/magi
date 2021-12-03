@@ -14,3 +14,8 @@ exclude = '''
   | .github
 )/
 '''
+
+[tool.isort]
+profile = "google"
+src_paths = ["magi"]
+known_first_party = ["magi"]
