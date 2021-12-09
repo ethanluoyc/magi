@@ -116,13 +116,15 @@ class TD3BCLearner(acme.Learner):
             q2_loss = _mse_loss(q2, q_target)
 
             critic_loss = q1_loss + q2_loss
-            return critic_loss
+            return critic_loss, {"q1": jnp.mean(q1), "q2": jnp.mean(q2)}
 
         def sgd_step(state: TrainingState, batch: reverb.ReplaySample):
             soft_update = lambda p, tp: optax.incremental_update(p, tp, tau)  # noqa
             critic_key, key = jax.random.split(state.key)
             # Update critic
-            critic_loss, critic_grads = jax.value_and_grad(critic_loss_fn)(
+            (critic_loss, critic_metrics), critic_grads = jax.value_and_grad(
+                critic_loss_fn, has_aux=True
+            )(
                 state.critic_params,
                 state.policy_target_params,
                 state.critic_target_params,
@@ -181,6 +183,7 @@ class TD3BCLearner(acme.Learner):
             )
             metrics = {
                 **policy_metrics,
+                **critic_metrics,
                 "policy_loss": policy_loss,
                 "critic_loss": critic_loss,
             }
@@ -223,8 +226,6 @@ class TD3BCLearner(acme.Learner):
         batch = next(self._iterator).data
 
         self._state, metrics = self._sgd_step(self._state, batch)
-        counts = self._counter.increment(steps=1)
-        self._logger.write({**counts, **metrics})
 
         # Compute elapsed time
         timestamp = time.time()
