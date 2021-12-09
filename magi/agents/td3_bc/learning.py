@@ -76,7 +76,7 @@ class TD3BCLearner(acme.Learner):
                 "lambda": lmbda,
                 "actor_loss": actor_loss,
             }
-            return policy_loss, metrics
+            return actor_loss, metrics
 
         def critic_loss_fn(
             critic_params: networks_lib.Params,
