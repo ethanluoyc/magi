@@ -6,8 +6,6 @@ from absl import flags
 import acme
 from acme import specs
 from acme import wrappers
-from dm_control import suite  # pytype: disable=import-error
-from dm_control.suite.wrappers import pixels  # pytype: disable=import-error
 import jax
 import numpy as np
 import tensorflow as tf
