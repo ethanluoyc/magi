@@ -1,4 +1,4 @@
-"""Run DrQ on dm_control suite."""
+"""Run DrQ on bsuite."""
 import time
 
 from absl import app
@@ -21,8 +21,6 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("domain_name", "cheetah", "dm_control domain")
 flags.DEFINE_string("task_name", "run", "dm_control task")
 flags.DEFINE_bool("wandb", False, "whether to log result to wandb")
-flags.DEFINE_string("wandb_project", "magi", "wandb project name")
-flags.DEFINE_string("wandb_entity", "ethanluoyc", "wandb project entity")
 flags.DEFINE_string("logdir", "./logs", "")
 flags.DEFINE_integer("num_steps", int(1e6), "")
 flags.DEFINE_integer("eval_freq", 5000, "")
@@ -34,64 +32,17 @@ flags.DEFINE_integer("min_replay_size", 1000, "Minimum replay size")
 flags.DEFINE_integer("batch_size", 128, "Batch size")
 flags.DEFINE_integer("seed", 42, "Random seed.")
 
-PLANET_ACTION_REPEAT = {
-    "cartpole-swingup": 8,
-    "reacher-easy": 4,
-    "cheetah-run": 4,
-    "finger-spin": 2,
-    "ball_in_cup-catch": 4,
-    "walker-walk": 2,
-}
-
-
-def load_env(domain_name, task_name, seed, frame_stack, action_repeat):
-    env = bsuite.load_from_id('catch/0')
-    env = wrappers.CanonicalSpecWrapper(env)
-    env = magi_wrappers.TakeKeyWrapper(env, "pixels")
-    env = wrappers.ActionRepeatWrapper(env, action_repeat)
-    env = magi_wrappers.FrameStackingWrapper(env, num_frames=frame_stack)
-    env = wrappers.SinglePrecisionWrapper(env)
-    return env
-
 
 def main(_):
     np.random.seed(FLAGS.seed)
-    if FLAGS.wandb:
-        import wandb  # pylint: disable=import-outside-toplevel
 
-        experiment_name = (
-            f"drq-{FLAGS.domain_name}-{FLAGS.task_name}_"
-            f"{FLAGS.seed}_{int(time.time())}"
-        )
-        wandb.init(
-            project=FLAGS.wandb_project,
-            entity=FLAGS.wandb_entity,
-            name=experiment_name,
-            config=FLAGS,
-            dir=FLAGS.logdir,
-        )
-    if FLAGS.action_repeat is None:
-        action_repeat = PLANET_ACTION_REPEAT.get(
-            f"{FLAGS.domain_name}-{FLAGS.task_name}", None
-        )
-        if action_repeat is None:
-            print(
-                "Unable to find action repeat configuration from PlaNet, default to 2"
-            )
-            action_repeat = 2
-    else:
-        action_repeat = FLAGS.action_repeat
-    env = load_env(
-        FLAGS.domain_name, FLAGS.task_name, FLAGS.seed, FLAGS.frame_stack, action_repeat
+    raw_environment = bsuite.load_and_record_to_csv(
+        bsuite_id=FLAGS.bsuite_id,
+        results_dir=FLAGS.results_dir,
+        overwrite=FLAGS.overwrite,
     )
-    test_env = load_env(
-        FLAGS.domain_name,
-        FLAGS.task_name,
-        FLAGS.seed + 42,
-        FLAGS.frame_stack,
-        action_repeat,
-    )
-    spec = specs.make_environment_spec(env)
+    environment = wrappers.SinglePrecisionWrapper(raw_environment)
+    spec = specs.make_environment_spec(environment)
     agent_networks = drq.make_networks(spec)
     agent = drq.DrQAgent(
         environment_spec=spec,
@@ -108,30 +59,15 @@ def main(_):
             label="learner", log_frequency=1000, use_wandb=FLAGS.wandb
         ),
     )
-    evaluator_network = drq.apply_policy_sample(agent_networks, eval_mode=True)
-    evaluator = agent.builder.make_actor(
-        jax.random.PRNGKey(FLAGS.seed + 10),
-        evaluator_network,
-        variable_source=agent,
-    )
+    loop = acme.EnvironmentLoop(environment, agent)
+    loop.run(num_episodes=environment.bsuite_num_episodes)
 
-    train_loop = acme.EnvironmentLoop(
-        env,
+    loop = acme.EnvironmentLoop(
+        environment,
         agent,
         logger=loggers.make_logger(label="train_loop", use_wandb=FLAGS.wandb),
     )
-    eval_loop = acme.EnvironmentLoop(
-        test_env,
-        evaluator,
-        logger=loggers.make_logger(label="eval_loop", use_wandb=FLAGS.wandb),
-    )
-    for _ in range(FLAGS.num_steps // FLAGS.eval_freq):
-        train_loop.run(num_steps=FLAGS.eval_freq)
-        evaluator.update(wait=True)
-        eval_loop.run(num_episodes=FLAGS.eval_episodes)
-
-    if FLAGS.wandb:
-        wandb.finish()
+    loop.run(num_episodes=environment.bsuite_num_episodes)
 
 
 if __name__ == "__main__":
