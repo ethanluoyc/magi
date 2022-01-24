@@ -18,7 +18,6 @@ import bsuite
 
 
 FLAGS = flags.FLAGS
-flags.DEFINE_bool("wandb", False, "whether to log result to wandb")
 flags.DEFINE_string("logdir", "./logs", "")
 flags.DEFINE_integer("num_steps", int(1e6), "")
 flags.DEFINE_integer("max_replay_size", 100000, "Maximum replay size")
