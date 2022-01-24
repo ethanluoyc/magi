@@ -15,6 +15,7 @@ import bsuite
 import haiku as hk
 import jax.numpy as jnp
 import numpy as np
+from acme.jax import networks
 
 from magi.agents import impala
 
