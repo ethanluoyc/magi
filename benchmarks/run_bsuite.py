@@ -1,5 +1,4 @@
 """Run SAC on bsuite."""
-import time
 
 from absl import app
 from absl import flags
@@ -9,7 +8,7 @@ from acme import wrappers
 import numpy as np
 import tensorflow as tf
 
-from magi.agents import sac_ae
+from magi.agents import sac, sac_ae
 from magi.agents.sac_ae import networks
 from magi.agents.sac_ae.agent import SACAEConfig
 import bsuite
@@ -36,22 +35,16 @@ def main(_):
     )
     env = wrappers.SinglePrecisionWrapper(raw_environment)
     spec = specs.make_environment_spec(env)
-    network_spec = networks.make_default_networks(spec)
 
-    agent = sac_ae.SACAEAgent(
+    agent_networks = sac.make_networks(spec)
+    agent = sac.SACAgent(
         environment_spec=spec,
-        networks=network_spec,
-        config=SACAEConfig(max_replay_size=FLAGS.max_replay_size),
+        networks=agent_networks,
         seed=FLAGS.seed,
+        config=sac.SACConfig(),
     )
 
     loop = acme.EnvironmentLoop(env, agent)
-    loop.run(num_episodes=env.bsuite_num_episodes)
-
-    loop = acme.EnvironmentLoop(
-        env,
-        agent,
-    )
     loop.run(num_episodes=env.bsuite_num_episodes)  # pytype: disable=attribute-error
 
 
