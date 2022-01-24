@@ -18,8 +18,6 @@ import bsuite
 
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("domain_name", "cheetah", "dm_control domain")
-flags.DEFINE_string("task_name", "run", "dm_control task")
 flags.DEFINE_bool("wandb", False, "whether to log result to wandb")
 flags.DEFINE_string("logdir", "./logs", "")
 flags.DEFINE_integer("num_steps", int(1e6), "")
@@ -31,6 +29,9 @@ flags.DEFINE_integer("max_replay_size", 100000, "Maximum replay size")
 flags.DEFINE_integer("min_replay_size", 1000, "Minimum replay size")
 flags.DEFINE_integer("batch_size", 128, "Batch size")
 flags.DEFINE_integer("seed", 42, "Random seed.")
+flags.DEFINE_string("bsuite_id", "catch/0", "Bsuite id.")
+flags.DEFINE_string("results_dir", "/tmp/bsuite", "CSV results directory.")
+flags.DEFINE_boolean("overwrite", False, "Whether to overwrite csv results.")
 
 
 def main(_):
