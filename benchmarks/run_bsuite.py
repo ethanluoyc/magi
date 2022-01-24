@@ -1,4 +1,4 @@
-"""Run DrQ on bsuite."""
+"""Run SAC on bsuite."""
 import time
 
 from absl import app
@@ -6,14 +6,12 @@ from absl import flags
 import acme
 from acme import specs
 from acme import wrappers
-import jax
 import numpy as np
 import tensorflow as tf
 
-from magi import wrappers as magi_wrappers
-from magi.agents import drq
-from magi.agents import sac
-from magi.utils import loggers
+from magi.agents import sac_ae
+from magi.agents.sac_ae import networks
+from magi.agents.sac_ae.agent import SACAEConfig
 import bsuite
 
 
@@ -38,19 +36,15 @@ def main(_):
     )
     env = wrappers.SinglePrecisionWrapper(raw_environment)
     spec = specs.make_environment_spec(env)
-    agent_networks = drq.make_networks(spec)
-    agent = drq.DrQAgent(
+    network_spec = networks.make_default_networks(spec)
+
+    agent = sac_ae.SACAEAgent(
         environment_spec=spec,
-        networks=agent_networks,
-        config=drq.DrQConfig(
-            target_entropy=sac.target_entropy_from_env_spec(spec),
-            max_replay_size=FLAGS.max_replay_size,
-            min_replay_size=FLAGS.min_replay_size,
-            batch_size=FLAGS.batch_size,
-            temperature_adam_b1=0.9,
-        ),
+        networks=network_spec,
+        config=SACAEConfig(max_replay_size=FLAGS.max_replay_size),
         seed=FLAGS.seed,
     )
+
     loop = acme.EnvironmentLoop(env, agent)
     loop.run(num_episodes=env.bsuite_num_episodes)
 
