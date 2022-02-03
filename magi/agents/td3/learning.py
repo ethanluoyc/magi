@@ -115,7 +115,7 @@ class TD3Learner(acme.Learner):
             critic_key, key = jax.random.split(state.key)
             # Update critic
             (critic_loss, critic_metrics), critic_grads = jax.value_and_grad(
-                critic_loss_fn
+                critic_loss_fn, has_aux=True
             )(
                 state.critic_params,
                 state.policy_target_params,
