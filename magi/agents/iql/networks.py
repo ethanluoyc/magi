@@ -66,7 +66,7 @@ class Policy(hk.Module):
         means = hk.Linear(self.action_dim, w_init=_default_init())(outputs)
 
         if self.state_dependent_std:
-            log_stds = nn.Dense(
+            log_stds = hk.Linear(
                 self.action_dim, w_init=_default_init(self.log_std_scale)
             )(outputs)
         else:
@@ -178,7 +178,7 @@ def make_networks(
 ):
     action_dim = spec.actions.shape[-1]
 
-    def _actor_fn(observations, is_training: bool, rng=None):
+    def _actor_fn(observations, is_training=False, key=None):
         # To handle potential use of dropout, the policy used by IQL
         # requires two additional args: `is_training` and `rng`
         # which are used by the IQL learner to optionally enable dropout
@@ -191,7 +191,7 @@ def make_networks(
             state_dependent_std=False,
             tanh_squash_distribution=False,
             dropout_rate=dropout_rate,
-        )(observations, is_training, rng=rng)
+        )(observations, is_training, rng=key)
 
     def _critic_fn(o, a):
         return DoubleCritic(hidden_dims)(o, a)

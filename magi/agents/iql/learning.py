@@ -92,7 +92,9 @@ class IQLLearner(acme.Learner):
             q = jnp.minimum(q1, q2)
             exp_a = jnp.exp((q - v) * temperature)
             exp_a = jnp.minimum(exp_a, 100.0)
-            dist = policy_network.apply(policy_params, batch.observation, True, key)
+            dist = policy_network.apply(
+                policy_params, batch.observation, is_training=True, key=key
+            )
             log_probs = dist.log_prob(batch.action)
             actor_loss = -(exp_a * log_probs).mean()
 
