@@ -13,7 +13,7 @@ rlax
 dm-haiku
 dm-reverb==0.6.1
 dm-launchpad==0.3.2
-dm-acme @ git+https://github.com/deepmind/acme@0.2.3
+dm-acme==0.2.3
 dm-tree
 ml_collections
 # Logging
