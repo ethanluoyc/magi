@@ -1,9 +1,7 @@
 absl-py
 numpy
-# TensorFlow
-tensorflow==2.7.0
-tensorflow_probability==0.15.0
-# JAX
+tensorflow
+tensorflow_probability
 -f https://storage.googleapis.com/jax-releases/jax_releases.html
 jax[cuda111]==0.2.21
 # DeepMind JAX eco-system
@@ -11,12 +9,12 @@ chex
 optax
 rlax
 dm-haiku
-dm-reverb==0.6.1
-dm-launchpad==0.3.2
-dm-acme==0.2.3
+dm-reverb
+dm-launchpad
+dm-acme[jax,tf]
 dm-tree
-ml_collections
 # Logging
+ml_collections
 wandb
 # Environments
 gym

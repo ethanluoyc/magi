@@ -8,6 +8,7 @@ the goal is to directly use the layout definition in Acme when if gives enough f
 from typing import Any, Callable, Optional, Sequence
 
 import acme
+from acme import core
 from acme import environment_loop
 from acme import specs
 from acme.agents.jax import builders
@@ -29,7 +30,9 @@ PolicyFactory = Callable[[Networks], Any]
 # environment factory takes arguments seed, testing
 # This deviates from the original implementation to provide determinism
 EnvironmentFactory = Callable[[int, bool], dm_env.Environment]
-EvaluatorFactory = types.EvaluatorFactory
+EvaluatorFactory = Callable[
+    [types.PRNGKey, core.VariableSource, counting.Counter], core.Worker
+]
 
 
 def _random_key_to_seed(key: types.PRNGKey) -> int:

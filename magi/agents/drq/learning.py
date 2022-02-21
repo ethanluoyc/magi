@@ -130,21 +130,17 @@ class TrainingState(NamedTuple):
 
     @property
     def encoder_critic_params(self):
-        return hk.data_structures.to_immutable_dict(
-            {
-                "encoder": self.encoder_params,
-                "critic": self.critic_params,
-            }
-        )
+        return {
+            "encoder": self.encoder_params,
+            "critic": self.critic_params,
+        }
 
     @property
     def encoder_critic_target_params(self):
-        return hk.data_structures.to_immutable_dict(
-            {
-                "encoder": self.encoder_target_params,
-                "critic": self.critic_target_params,
-            }
-        )
+        return {
+            "encoder": self.encoder_target_params,
+            "critic": self.critic_target_params,
+        }
 
 
 class DrQLearner(core.Learner):
@@ -212,9 +208,7 @@ class DrQLearner(core.Learner):
 
         actor_init_opt_state = self._opt_actor.init(actor_init_params)
         encoder_init_critic_opt_state = self._opt_critic.init(
-            hk.data_structures.to_immutable_dict(
-                {"encoder": encoder_init_params, "critic": critic_init_params}
-            )
+            {"encoder": encoder_init_params, "critic": critic_init_params}
         )
         alpha_init_opt_state = self._opt_alpha.init(init_log_alpha)
 

@@ -1,5 +1,5 @@
 from acme import types
-import d4rl
+import d4rl  # type: ignore
 import gym
 import numpy as np
 from tqdm import tqdm

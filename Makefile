@@ -38,11 +38,10 @@ clean:
 
 .PHONY: lint
 lint:
-	flake8 $(SRC)
 	pylint $(SRC)
 
 .PHONY: install
 install:
 	pip install -U pip setuptools wheel
-	pip install -r requirements-dev.txt -r requirements.txt
+	pip install -r requirements/base.txt -r requirements/dev.txt
 	pip install -e .
