@@ -24,7 +24,7 @@ source venv/bin/activate
 
 ```bash
 pip install -U pip setuptools wheel
-pip install -r requirements.txt # This uses pinned dependencies, you may adjust this for your needs.
+pip install -r requirements/base.txt # This uses pinned dependencies, you may adjust this for your needs.
 pip install -e .
 ```
 

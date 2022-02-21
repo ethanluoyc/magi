@@ -1,14 +1,32 @@
 """Test for subprocess wrapper."""
 from absl.testing import absltest
 import gym
+from gym import spaces
 
 from magi.wrappers import gym_subproc
+
+
+class DummyEnv(gym.Env):
+    """Dummy gym environment for testing subprocess wrapper"""
+
+    def __init__(self):
+        self.action_space = spaces.Discrete(2)
+        self.observation_space = spaces.Discrete(2)
+
+    def step(self, action):
+        return self.observation_space.sample(), 0.0, True, {}
+
+    def reset(self):
+        return self.observation_space.sample()
+
+    def render(self, mode="human"):
+        return
 
 
 class SubProcessWrapperTest(absltest.TestCase):
     def test_subproc_env(self):
         """Test that subproc env runs"""
-        env = gym_subproc.SubprocEnv(lambda **kwargs: gym.make("CartPole-v1"))
+        env = gym_subproc.SubprocEnv(lambda **kwargs: DummyEnv())
         env.seed()
         env.reset()
         while True:
