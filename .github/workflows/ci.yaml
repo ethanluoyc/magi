@@ -16,20 +16,15 @@ jobs:
         python-version: [3.8]
     steps:
     - uses: actions/checkout@v2
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v1
-      with:
-        python-version: ${{ matrix.python-version }}
-    - uses: actions/cache@v2
-      with:
-        path: ${{ env.pythonLocation }}
-        key: ${{ runner.os }}-pydeps-${{ env.pythonLocation }}-${{ hashFiles('setup.py') }}-${{ hashFiles('requirements*.txt') }}
-    - name: Install dependencies
-      run: |
-        make install
-    - name: Show installed dependencies
-      run: |
-        pip freeze
-    - name: Test with pytest
-      run: |
-        make test
+    - uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python }}
+          cache: 'pip'
+          cache-dependency-path: 'requirements/*.txt'
+    - name: update pip
+        run: |
+          pip install -U wheel
+          pip install -U setuptools
+          python -m pip install -U pip
+    - run: pip install nox
+      - run: nox
