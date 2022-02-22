@@ -118,7 +118,7 @@ class IMPALATest(absltest.TestCase):
         # Try running the environment loop. We have no assertions here because all
         # we care about is that the agent runs without raising any errors.
         loop = acme.EnvironmentLoop(environment, agent)
-        loop.run(num_episodes=20)
+        loop.run(num_episodes=2)
 
 
 if __name__ == "__main__":

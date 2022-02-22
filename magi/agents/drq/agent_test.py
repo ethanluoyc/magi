@@ -32,7 +32,7 @@ class DrQTest(absltest.TestCase):
             config=drq.DrQConfig(
                 batch_size=2,
                 target_entropy=sac.target_entropy_from_env_spec(spec),
-                min_replay_size=10,
+                min_replay_size=1,
             ),
         )
 
@@ -41,7 +41,7 @@ class DrQTest(absltest.TestCase):
             agent,
             logger=loggers.make_default_logger(label="environment", save_data=False),
         )
-        loop.run(num_episodes=20)
+        loop.run(num_episodes=2)
 
 
 if __name__ == "__main__":

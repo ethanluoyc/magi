@@ -32,7 +32,7 @@ class SACTest(absltest.TestCase):
             config=sac_config.SACConfig(
                 target_entropy=sac_config.target_entropy_from_env_spec(spec),
                 min_replay_size=1,
-                batch_size=1,
+                batch_size=2,
             ),
             seed=0,
         )
@@ -44,7 +44,7 @@ class SACTest(absltest.TestCase):
             agent,
             logger=loggers.make_default_logger(label="environment", save_data=False),
         )
-        loop.run(num_episodes=20)
+        loop.run(num_episodes=2)
 
 
 if __name__ == "__main__":

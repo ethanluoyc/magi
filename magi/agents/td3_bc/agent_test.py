@@ -15,7 +15,7 @@ class TD3BCTest(absltest.TestCase):
         )
         spec = specs.make_environment_spec(environment)
         # # Try running the environment loop. We have no assertions here because all
-        agent_networks = td3.make_networks(spec, (10, 10), (10, 10))
+        agent_networks = td3.make_networks(spec, (10,), (10,))
         dataset = fakes.transition_dataset(environment).batch(10).as_numpy_iterator()
         learner = td3_bc.TD3BCLearner(
             policy_network=agent_networks["policy"],

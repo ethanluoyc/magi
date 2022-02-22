@@ -28,7 +28,11 @@ class SACAETest(absltest.TestCase):
             environment_spec=spec,
             networks=network_spec,
             seed=0,
-            config=SACAEConfig(initial_num_steps=10, batch_size=2),
+            config=SACAEConfig(
+                min_replay_size=1,
+                initial_num_steps=0,
+                batch_size=2,
+            ),
         )
 
         loop = acme.EnvironmentLoop(
@@ -36,7 +40,7 @@ class SACAETest(absltest.TestCase):
             agent,
             logger=loggers.make_default_logger(label="environment", save_data=False),
         )
-        loop.run(num_episodes=20)
+        loop.run(num_episodes=2)
 
 
 if __name__ == "__main__":

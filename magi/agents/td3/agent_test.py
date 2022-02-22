@@ -30,7 +30,7 @@ class TD3Test(absltest.TestCase):
             networks=agent_networks,
             config=td3.TD3Config(
                 min_replay_size=1,
-                batch_size=1,
+                batch_size=5,
             ),
             random_key=jax.random.PRNGKey(0),
         )
@@ -42,7 +42,7 @@ class TD3Test(absltest.TestCase):
             agent,
             logger=loggers.make_default_logger(label="environment", save_data=False),
         )
-        loop.run(num_episodes=20)
+        loop.run(num_episodes=2)
 
 
 if __name__ == "__main__":
