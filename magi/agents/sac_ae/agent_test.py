@@ -4,9 +4,7 @@ import acme
 from acme import specs
 from acme.utils import loggers
 
-from magi.agents.sac_ae import networks
-from magi.agents.sac_ae.agent import SACAEAgent
-from magi.agents.sac_ae.agent import SACAEConfig
+from magi.agents import sac_ae
 from magi.testing import fakes
 
 
@@ -18,17 +16,17 @@ class SACAETest(absltest.TestCase):
         )
         spec = specs.make_environment_spec(environment)
         # Construct the agent.
-        network_spec = networks.make_default_networks(
+        network_spec = sac_ae.make_default_networks(
             spec,
             actor_hidden_sizes=(32, 32),
             critic_hidden_sizes=(32, 32),
             num_layers=4,
         )
-        agent = SACAEAgent(
+        agent = sac_ae.SACAEAgent(
             environment_spec=spec,
             networks=network_spec,
             seed=0,
-            config=SACAEConfig(
+            config=sac_ae.SACAEConfig(
                 min_replay_size=1,
                 initial_num_steps=0,
                 batch_size=2,

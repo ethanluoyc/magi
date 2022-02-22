@@ -5,8 +5,8 @@ from acme.testing import fakes
 import jax
 import optax
 
+from magi.agents import cql
 from magi.agents import sac
-from magi.agents.cql import learning
 
 
 class CQLTest(absltest.TestCase):
@@ -21,7 +21,7 @@ class CQLTest(absltest.TestCase):
             policy_layer_sizes=(10, 10),
             critic_layer_sizes=(10, 10),
         )
-        learner = learning.CQLLearner(
+        learner = cql.CQLLearner(
             policy_network=agent_networks["policy"],
             critic_network=agent_networks["critic"],
             random_key=jax.random.PRNGKey(0),

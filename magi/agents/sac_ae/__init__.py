@@ -1,3 +1,4 @@
 """SAC-AE agent."""
-from .agent import SACAEAgent  # noqa
-from .agent import SACAEConfig  # noqa
+from magi.agents.sac_ae.agent import SACAEAgent
+from magi.agents.sac_ae.agent import SACAEConfig
+from magi.agents.sac_ae.networks import make_default_networks
