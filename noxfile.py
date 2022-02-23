@@ -8,8 +8,6 @@ def tests(session):
     session.install(
         "-r",
         "requirements/tests.txt",
-        "-r",
-        "requirements/tests-acme-dev.txt",
     )
     session.run("make", "integration-test", external=True)
 

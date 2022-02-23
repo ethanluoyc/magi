@@ -1,7 +1,0 @@
-# Test against latest acme dependencies
-ml_collections
-wandb
-# Environments
-gym
-PyYAML
-dm-acme[jax,tf] @ git+https://github.com/deepmind/acme.git@master

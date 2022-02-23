@@ -8,7 +8,7 @@ jax[cuda111]==0.2.21
 chex
 optax
 rlax
-dm-haiku
+dm-haiku<0.0.6
 dm-reverb
 dm-launchpad
 dm-acme[jax,tf]
