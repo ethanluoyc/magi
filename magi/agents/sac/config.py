@@ -16,7 +16,8 @@ def target_entropy_from_env_spec(env_spec: specs.EnvironmentSpec) -> float:
 class SACConfig:
     """Soft Actor-Critic agent parameters."""
 
-    target_entropy: Optional[float] = None
+    entropy_coefficient: Optional[float] = None
+    target_entropy: float = 0
     min_replay_size: int = 1000
     max_replay_size: int = 1_000_000
     replay_table_name: str = adders_reverb.DEFAULT_PRIORITY_TABLE

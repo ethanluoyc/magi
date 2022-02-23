@@ -48,7 +48,7 @@ def main(_):
         environment_spec=spec,
         networks=agent_networks,
         seed=FLAGS.seed,
-        config=sac.SACConfig(),
+        config=sac.SACConfig(target_entropy=sac.target_entropy_from_env_spec(spec)),
         logger=loggers.make_logger(
             "agent",
             use_wandb=FLAGS.wandb,

@@ -27,10 +27,6 @@ class SACAgent(core.Actor):
         counter: Optional[counting.Counter] = None,
     ):
         # If the user does not specify a target entropy, infer it from the spec.
-        if config.target_entropy is None:
-            config.target_entropy = sac_config.target_entropy_from_env_spec(
-                environment_spec
-            )
         self.builder = builder.SACBuilder(config, logger_fn=lambda: logger)
         learner_key, actor_key = jax.random.split(jax.random.PRNGKey(seed))
         self._num_observations = 0

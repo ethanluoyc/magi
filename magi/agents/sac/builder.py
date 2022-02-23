@@ -135,7 +135,7 @@ class SACBuilder(builders.ActorLearnerBuilder):
             networks["critic"],
             random_key=random_key,
             dataset=dataset,
-            actor_optimizer=actor_opt,
+            policy_optimizer=actor_opt,
             critic_optimizer=critic_opt,
             alpha_optimizer=alpha_opt,
             target_entropy=self._config.target_entropy,
