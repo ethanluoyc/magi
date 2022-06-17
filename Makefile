@@ -43,5 +43,5 @@ lint:
 .PHONY: install
 install:
 	pip install -U pip setuptools wheel
-	pip install -r requirements/base.txt -r requirements/dev.txt
+	pip install -r requirements/dev.txt
 	pip install -e .

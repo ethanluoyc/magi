@@ -266,9 +266,7 @@ class ModelEnv:
             ensem_params, state, rng, shuffled_observations, shuffled_actions
         )
         # Shuffle back
-        next_obs = jax.ops.index_update(
-            shuffled_output, shuffle_indices, shuffled_output
-        )
+        next_obs = shuffled_output.at[shuffle_indices].set(shuffled_output)
         return (
             next_obs,
             self._reward_fn(next_obs, actions, goal),

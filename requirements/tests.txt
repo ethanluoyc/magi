@@ -6,7 +6,7 @@
 #    pip-compile-multi
 #
 -r base.txt
---find-links https://storage.googleapis.com/jax-releases/jax_releases.html
+--find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
 execnet==1.9.0
     # via pytest-xdist
@@ -18,7 +18,7 @@ py==1.11.0
     # via
     #   pytest
     #   pytest-forked
-pytest==7.0.1
+pytest==7.1.2
     # via
     #   -r requirements/tests.in
     #   pytest-forked

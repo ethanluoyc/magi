@@ -1,14 +1,14 @@
 absl-py
 numpy
-tensorflow
-tensorflow_probability
--f https://storage.googleapis.com/jax-releases/jax_releases.html
-jax[cuda111]==0.2.21
+tensorflow==2.8.0
+tensorflow_probability==0.15.0
+-f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+jax[cuda]==0.3.6
 # DeepMind JAX eco-system
 chex
 optax
 rlax
-dm-haiku<0.0.6
+dm-haiku
 dm-reverb
 dm-launchpad
 dm-acme[jax,tf]
