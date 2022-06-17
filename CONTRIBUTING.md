@@ -40,13 +40,12 @@ adopted by this repository.
 
 There use the following tools to ensure that the code conform to the styles.
 
-1. [flake8](https://flake8.pycqa.org/en/latest/) ensures that the code is PEP8 compatible.
-2. [pytype](https://google.github.io/pytype/) is used for type checking the code.
+1. [pytype](https://google.github.io/pytype/) is used for type checking the code.
 Whenever possible, the public interface should be annotated with types.
-3. [pylint](http://pylint.pycqa.org/en/latest/) catches common style issues and
+2. [pylint](http://pylint.pycqa.org/en/latest/) catches common style issues and
 potential errors. We use the configuration from the [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html).
-4. [black](https://black.readthedocs.io/en/stable/) is used to autoformat the code.
-5. [isort](https://pycqa.github.io/isort/) is used for sorting import lines automatically.
+3. [yapf](https://github.com/google/yapf) is used to autoformat the code.
+4. [isort](https://pycqa.github.io/isort/) is used for sorting import lines automatically.
 isort is configured to use the Google style.
 
 You may want to set up [pre-commit](https://pre-commit.com/) hooks to ensure that your commits
@@ -82,13 +81,14 @@ for developing Magi with VSCode.
 2. The following settings.json file can be used
 ```json
 {
-    "python.linting.flake8Enabled": true,
+    "python.linting.flake8Enabled": false,
     "python.linting.mypyEnabled": false,
     "python.linting.pylintEnabled": true,
     "python.languageServer": "Pylance",
     "python.linting.enabled": true,
-    "python.formatting.provider": "black",
-    "editor.rulers": [88],
+    "python.formatting.provider": "yapf",
+    "editor.rulers": [80],
+    "editor.tabSize": 4,
     "editor.detectIndentation": false,
     "editor.formatOnSave": true,
     "editor.codeActionsOnSave": {

@@ -7,8 +7,7 @@ from dm_env import specs
 NestedArray = Any
 NestedTensor = Any
 
-NestedSpec = Union[
-    specs.Array,
-    Iterable["NestedSpec"],  # pytype: disable=not-supported-yet
-    Mapping[Any, "NestedSpec"],  # pytype: disable=not-supported-yet
-]
+# pytype: disable=not-supported-yet
+NestedSpec = Union[specs.Array, Iterable['NestedSpec'], Mapping[Any,
+                                                                'NestedSpec']]
+# pytype: enable=not-supported-yet

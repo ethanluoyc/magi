@@ -9,18 +9,29 @@ repos:
   -   id: check-yaml
   -   id: check-added-large-files
 
+# The revision for the versions below can be found by running
+# grep -E '^(pylint|isort|yapf)' requirements/*.txt
+
+- repo: https://github.com/pre-commit/mirrors-yapf
+  rev: 'v0.32.0'  # Use the sha / tag you want to point at
+  hooks:
+  - id: yapf
+    language: python
+    types: [python]
+    additional_dependencies: [toml]
+
 - repo: http://github.com/timothycrosley/isort
-  rev: 5.8.0
+  rev: 5.10.1
   hooks:
   - id: isort
+    language: python
+    types: [python]
 
-- repo: https://github.com/ambv/black
-  rev: 21.6b0
+- repo: https://github.com/PyCQA/pylint
+  rev: 'v2.14.2'  # Use the sha / tag you want to point at
   hooks:
-  - id: black
-    language_version: python3
-
-# - repo: https://github.com/PyCQA/pylint
-#   rev: 'v2.8.2'  # Use the sha / tag you want to point at
-#   hooks:
-#   - id: pylint
+  - id: pylint
+    args: ["--rcfile=.pylintrc"]
+    language: python
+    types: [python]
+    exclude: (^magi/projects/|^magi/examples/)

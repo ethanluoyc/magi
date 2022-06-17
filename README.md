@@ -7,7 +7,6 @@
 **[Documentation](./docs)**
 
 [![pytest](https://github.com/ethanluoyc/magi/actions/workflows/ci.yaml/badge.svg?branch=develop)](https://github.com/ethanluoyc/magi/actions/workflows/ci.yaml)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
 Magi is a RL library developed on top of [Acme](https://github.com/deepmind/acme).
 
