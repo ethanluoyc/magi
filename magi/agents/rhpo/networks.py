@@ -1,3 +1,4 @@
+"""Network definition for RHPO"""
 from typing import Tuple
 
 from absl.testing import absltest
@@ -13,15 +14,27 @@ import tensorflow_probability.substrates.jax as tfp
 tfd = tfp.distributions
 
 
+def apply_policy_and_sample(networks, action_spec, eval_mode=True):
+
+  def policy_network(params, key, obs):
+    # TODO(yl): implement multi-task
+    task_id = jnp.zeros((obs.shape[0],), dtype=jnp.int32)
+    action_dist = networks['policy'].apply(params, obs, task_id)
+    action = action_dist.mode() if eval_mode else action_dist.sample(seed=key)
+    return jnp.clip(action, action_spec.minimum, action_spec.maximum)
+
+  return policy_network
+
+
 def make_networks(
     environment_spec: specs.EnvironmentSpec,
     num_tasks: int,
     num_components: int,
-    policy_torso_sizes: Tuple[int] =(400, 200),
-    critic_torso_sizes: Tuple[int] =(400, 400),
-    policy_controller_head_size: int = 100,
-    policy_component_head_size: int = 100,
-    critic_head_size: int = 100,
+    policy_torso_sizes: Tuple[int] = (256, 256),
+    critic_torso_sizes: Tuple[int] = (512, 512),
+    policy_controller_head_size: int = 256,
+    policy_component_head_size: int = 256,
+    critic_head_size: int = 512,
 ):
   num_dimensions = np.prod(environment_spec.actions.shape, dtype=int)
 
@@ -32,11 +45,14 @@ def make_networks(
     for task_id_ in range(num_tasks):
       controller_heads.append(
           hk.nets.MLP([policy_controller_head_size, num_components],
+                      activation=jax.nn.elu,
                       name=f'policy_controller_head_{task_id_}'))
     for _ in range(num_components):
       component_heads.append(
           hk.Sequential([
-              hk.nets.MLP([policy_component_head_size], activate_final=True),
+              hk.nets.MLP([policy_component_head_size],
+                          activate_final=True,
+                          activation=jax.nn.elu),
               networks_lib.MultivariateNormalDiagHead(
                   num_dimensions=num_dimensions)
           ]))
@@ -59,16 +75,20 @@ def make_networks(
     )
 
   def _critic(obs, action):
+    action = networks_lib.ClipToSpec(environment_spec.actions)(action)
     torso = networks_lib.LayerNormMLP(critic_torso_sizes, activate_final=True)
     critic_heads = []
     for task_id in range(num_tasks):
       critic_heads.append(
-          hk.nets.MLP([critic_head_size, 1], name=f'critic_head_{task_id}'))
+          hk.nets.MLP([critic_head_size, 1],
+                      name=f'critic_head_{task_id}',
+                      activation=jax.nn.elu))
     inputs = utils.batch_concat([obs, action])
     embedding = torso(inputs)
-    critic_values = jnp.concatenate([head(embedding) for head in critic_heads],
-                                    axis=-1)
-    return critic_values
+    # critic_values = jnp.concatenate([head(embedding) for head in critic_heads],
+    #                                 axis=-1)
+    # return critic_values
+    return critic_heads[0](embedding)
 
   policy_network = hk.without_apply_rng(hk.transform(_policy))
   critic_network = hk.without_apply_rng(hk.transform(_critic))

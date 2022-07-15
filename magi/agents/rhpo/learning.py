@@ -88,6 +88,12 @@ class RHPOLearner(acme.Learner):
       batch_size = transitions.discount.shape[0]
       tiled_o_t = utils.tile_nested(o_t, num_samples)  # [N, B, ...]
       critic_loss = 0.
+
+      rewards = transitions.reward
+      # Expand reward to in case of single-task
+      if rewards.ndim == 1:
+        rewards = jnp.expand_dims(rewards, axis=-1)
+
       for task_i in range(num_tasks):
         task_ids = jnp.full((batch_size,), task_i, dtype=jnp.int32)
 
@@ -105,9 +111,9 @@ class RHPOLearner(acme.Learner):
             target_critic_params,
             tiled_o_t,
             sampled_actions,
-        )
+        )[:, :, task_i]
 
-        q_t = jnp.mean(sampled_q_t, axis=0)[:, task_i]  # [B]
+        q_t = jnp.mean(sampled_q_t, axis=0)  # [B]
 
         # Compute online critic value of a_tm1 in state o_tm1.
         q_tm1 = critic_network.apply(critic_params, o_tm1,
@@ -115,7 +121,7 @@ class RHPOLearner(acme.Learner):
 
         # Critic loss.
         batch_td_learning = jax.vmap(rlax.td_learning)
-        td_error = batch_td_learning(q_tm1, transitions.reward[:, task_i],
+        td_error = batch_td_learning(q_tm1, rewards[:, task_i],
                                      discount * transitions.discount, q_t)
         critic_loss += jnp.mean(jnp.square(td_error))
 
@@ -132,11 +138,20 @@ class RHPOLearner(acme.Learner):
       policy_key, key = jax.random.split(key)
       sampled_actions = target_action_distribution.sample(
           num_samples, seed=policy_key)
+      # [N, B, T]
       sampled_q_t = jax.vmap(critic_network.apply, (None, 0, 0))(
           target_critic_params,
           tiled_o_t,
           sampled_actions,
       )
+      # [N, B]
+      sampled_q_t = jnp.squeeze(
+          jnp.take_along_axis(
+              sampled_q_t,
+              jnp.expand_dims(task_ids, axis=(0, -1)),
+              axis=-1,
+          ),
+          axis=-1)
 
       policy_loss, policy_stats = policy_loss_fn(
           mpo_params,
