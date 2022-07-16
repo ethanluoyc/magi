@@ -1,3 +1,2 @@
--r base.in
 pytest
 pytest-xdist
