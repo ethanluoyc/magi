@@ -12,8 +12,8 @@ class MPOConfig:
   min_replay_size: int = 1000
   max_replay_size: int = 1_000_000
   replay_table_name: str = adders_reverb.DEFAULT_PRIORITY_TABLE
-  prefetch_size: Optional[int] = None
-  samples_per_insert: float = 256
+  prefetch_size: Optional[int] = 4
+  samples_per_insert: float = 32.0
 
   discount: float = 0.99
   batch_size: int = 256
@@ -25,3 +25,5 @@ class MPOConfig:
   dual_learning_rate = 1e-2
   target_policy_update_period: int = 100
   target_critic_update_period: int = 100
+  retrace: bool = True
+  retrace_sequence_length: int = 10

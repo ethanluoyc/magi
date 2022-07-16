@@ -14,7 +14,10 @@ def apply_policy_and_sample(networks, action_spec, eval_mode: bool):
   def policy_network(params, key, obs):
     action_dist = networks['policy'].apply(params, obs)
     action = action_dist.mode() if eval_mode else action_dist.sample(seed=key)
-    return jnp.clip(action, action_spec.minimum, action_spec.maximum)
+    action = jnp.clip(action, action_spec.minimum, action_spec.maximum)
+    log_prob = action_dist.log_prob(action)
+    extra = {'log_prob': log_prob}
+    return action, extra
 
   return policy_network
 
