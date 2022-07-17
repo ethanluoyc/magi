@@ -116,10 +116,11 @@ def main(_):
       logger=loggers.make_logger(
           label='learner', log_frequency=1000, use_wandb=FLAGS.wandb),
   )
-  evaluator_network = drq.apply_policy_sample(agent_networks, eval_mode=True)
+  eval_policy = drq.apply_policy_sample(agent_networks, eval_mode=True)
   evaluator = agent.builder.make_actor(
       jax.random.PRNGKey(FLAGS.seed + 10),
-      evaluator_network,
+      eval_policy,
+      spec,
       variable_source=agent,
   )
 

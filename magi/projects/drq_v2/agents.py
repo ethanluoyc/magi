@@ -36,5 +36,5 @@ def drq_v2_agent(config, random_key, spec, logger):
       optax.constant_schedule(0.0),
   )
   eval_actor = agent.builder.make_actor(
-      eval_key, evaluator_network, variable_source=agent)
+      eval_key, evaluator_network, spec, variable_source=agent)
   return agent, eval_actor

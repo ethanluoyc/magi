@@ -6,6 +6,7 @@ permalink: https://perma.cc/C9ZM-652R
 Code copied from
 https://github.com/facebookresearch/mbrl-lib/blob/master/mbrl/env/cartpole_continuous.py
 """
+# pylint: disable=all
 
 import math
 
@@ -159,7 +160,7 @@ class CartPoleEnv(gym.Env):
 
     return np.array(self.state), reward, done, {}
 
-  def reset(self):
+  def reset(self, *args):
     self.state = self.np_random.uniform(low=-0.05, high=0.05, size=(4,))
     self.steps_beyond_done = None
     return np.array(self.state)

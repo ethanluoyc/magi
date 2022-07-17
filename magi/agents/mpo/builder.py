@@ -1,5 +1,5 @@
 """MPO builder"""
-from typing import Callable, Iterator, List, Optional
+from typing import Dict, Iterator, List, Optional
 
 from acme import adders
 from acme import core
@@ -12,8 +12,6 @@ from acme.agents.jax import builders
 from acme.jax import losses
 from acme.jax import networks as networks_lib
 from acme.jax import variable_utils
-from acme.jax.types import Networks
-from acme.jax.types import PolicyNetwork
 from acme.utils import counting
 from acme.utils import loggers
 import optax
@@ -23,6 +21,8 @@ from reverb import rate_limiters
 from magi.agents.mpo import config as mpo_config
 from magi.agents.mpo import learning as learning_lib
 
+MPONetworks = Dict[str, networks_lib.FeedForwardNetwork]
+
 
 class MPOBuilder(builders.ActorLearnerBuilder):
   """MPO agent builder"""
@@ -31,7 +31,6 @@ class MPOBuilder(builders.ActorLearnerBuilder):
       self,
       config: mpo_config.MPOConfig,
       policy_loss_fn: Optional[losses.MPO] = None,
-      logger_fn: Callable[[], loggers.Logger] = lambda: None,
   ):
     """Create a builder for assembling MPO agents.
 
@@ -40,17 +39,16 @@ class MPOBuilder(builders.ActorLearnerBuilder):
       policy_loss_fn: policy loss for MPO, if None, then a default
           will be chosen similar to the Acme TF MPO agent.
           See `MPOLearner` for defaults.
-      logger_fn: a callable that returns the logger used by the MPO
-          learner component.
     """
     self._config = config
-    self._logger_fn = logger_fn
     self._policy_loss_fn = policy_loss_fn
 
   def make_replay_tables(
       self,
       environment_spec: specs.EnvironmentSpec,
+      policy: actor_core.FeedForwardPolicy,
   ) -> List[reverb.Table]:
+    del policy
     replay_table = reverb.Table(
         name=self._config.replay_table_name,
         sampler=reverb.selectors.Uniform(),
@@ -61,8 +59,6 @@ class MPOBuilder(builders.ActorLearnerBuilder):
             environment_spec=environment_spec),
     )
     # Cache the environment spec here, this is needed as the
-    # MPO learner needs to know the action_spec to initialize the dual variables
-    self._environment_spec = environment_spec
     return [replay_table]
 
   def make_dataset_iterator(
@@ -87,17 +83,19 @@ class MPOBuilder(builders.ActorLearnerBuilder):
   def make_actor(
       self,
       random_key: networks_lib.PRNGKey,
-      policy_network: PolicyNetwork,
-      adder: Optional[adders.Adder] = None,
+      policy: actor_core.FeedForwardPolicy,
+      environment_spec: specs.EnvironmentSpec,
       variable_source: Optional[core.VariableSource] = None,
+      adder: Optional[adders.Adder] = None,
   ) -> core.Actor:
+    del environment_spec
     assert variable_source is not None
     variable_client = variable_utils.VariableClient(
         variable_source, 'policy', device='cpu')
     variable_client.update_and_wait()
 
     return actors.GenericActor(
-        actor_core.batched_feed_forward_to_actor_core(policy_network),
+        actor_core.batched_feed_forward_to_actor_core(policy),
         random_key,
         variable_client=variable_client,
         adder=adder,
@@ -106,8 +104,10 @@ class MPOBuilder(builders.ActorLearnerBuilder):
   def make_learner(
       self,
       random_key: networks_lib.PRNGKey,
-      networks: Networks,
+      networks: MPONetworks,
       dataset: Iterator[reverb.ReplaySample],
+      logger_fn: loggers.LoggerFactory,
+      environment_spec: specs.EnvironmentSpec,
       replay_client: Optional[reverb.Client] = None,
       counter: Optional[counting.Counter] = None,
   ) -> core.Learner:
@@ -133,10 +133,10 @@ class MPOBuilder(builders.ActorLearnerBuilder):
         dual_optimizer=dual_optimizer,
         discount=self._config.discount,
         num_samples=self._config.num_samples,
-        action_dim=self._environment_spec.actions.shape[0],
+        action_dim=environment_spec.actions.shape[0],
         target_policy_update_period=self._config.target_policy_update_period,
         target_critic_update_period=self._config.target_critic_update_period,
         policy_loss_fn=self._policy_loss_fn,
-        logger=self._logger_fn(),
+        logger=logger_fn('learner'),
         counter=counter,
     )

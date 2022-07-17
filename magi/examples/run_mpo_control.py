@@ -66,9 +66,10 @@ def main(_):
       ),
   )
   eval_actor = agent.builder.make_actor(
-      random_key=jax.random.PRNGKey(FLAGS.seed + 1),
-      policy_network=mpo.apply_policy_and_sample(
+      jax.random.PRNGKey(FLAGS.seed + 1),
+      mpo.apply_policy_and_sample(
           agent_networks, spec.actions, eval_mode=True),
+      spec,
       variable_source=agent,
   )
   eval_loop = acme.EnvironmentLoop(

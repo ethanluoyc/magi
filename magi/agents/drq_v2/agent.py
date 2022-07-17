@@ -40,13 +40,16 @@ class DrQV2(agent_lib.Agent):
     config.samples_per_insert_tolerance_rate = float('inf')
     config.min_replay_size = 1
     config.min_observations = min_replay_size
-    self.builder = builder.DrQV2Builder(config, logger_fn=lambda: logger)
+    self.builder = builder.DrQV2Builder(config)
 
     random_key = jax.random.PRNGKey(seed)
     learner_key, actor_key = jax.random.split(random_key)
+    policy = drq_v2_networks.get_default_behavior_policy(
+        networks, environment_spec.actions,
+        optax.linear_schedule(*config.sigma))
 
     # Setup reverb
-    replay_tables = self.builder.make_replay_tables(environment_spec)
+    replay_tables = self.builder.make_replay_tables(environment_spec, policy)
     replay_server = reverb.Server(replay_tables, port=None)
     self._server = replay_server
 
@@ -58,14 +61,18 @@ class DrQV2(agent_lib.Agent):
       device = jax.devices()[0] if device_prefetch else None
       dataset = utils.prefetch(dataset, config.prefetch_size, device)
     learner = self.builder.make_learner(
-        learner_key, networks, dataset, counter=counter)
+        random_key=learner_key,
+        networks=networks,
+        dataset=dataset,
+        environment_spec=environment_spec,
+        logger_fn=lambda _, steps_key=None, task=None: logger,
+        counter=counter)
 
     adder = self.builder.make_adder(replay_client)
     actor = self.builder.make_actor(
         actor_key,
-        drq_v2_networks.get_default_behavior_policy(
-            networks, environment_spec.actions,
-            optax.linear_schedule(*config.sigma)),
+        policy,
+        environment_spec,
         adder=adder,
         variable_source=learner,
     )

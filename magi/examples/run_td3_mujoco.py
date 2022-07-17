@@ -74,8 +74,9 @@ def main(_):
       logger=loggers.make_logger(label='train_loop', use_wandb=FLAGS.wandb),
   )
   evaluator = agent.builder.make_actor(
-      random_key=jax.random.PRNGKey(FLAGS.seed + 10),
-      policy_network=td3.apply_policy_sample(agent_networks, eval_mode=True),
+      jax.random.PRNGKey(FLAGS.seed + 10),
+      td3.apply_policy_sample(agent_networks, eval_mode=True),
+      environment_spec,
       variable_source=agent,
   )
   eval_env = load_env(FLAGS.env, FLAGS.seed + 1000)

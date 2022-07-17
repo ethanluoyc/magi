@@ -27,12 +27,15 @@ class SACAgent(core.Actor):
       counter: Optional[counting.Counter] = None,
   ):
     # If the user does not specify a target entropy, infer it from the spec.
-    self.builder = builder.SACBuilder(config, logger_fn=lambda: logger)
+    self.builder = builder.SACBuilder(config)
     learner_key, actor_key = jax.random.split(jax.random.PRNGKey(seed))
     self._num_observations = 0
     self._min_observations = config.min_replay_size
 
-    replay_tables = self.builder.make_replay_tables(environment_spec)
+    def policy(params, key, obs):
+      return networks['policy'].apply(params, obs).sample(seed=key)
+
+    replay_tables = self.builder.make_replay_tables(environment_spec, policy)
     replay_server = reverb.Server(replay_tables, port=None)
     self._server = replay_server
 
@@ -44,15 +47,18 @@ class SACAgent(core.Actor):
     dataset = self.builder.make_dataset_iterator(replay_client)
 
     self._learner = self.builder.make_learner(
-        learner_key, networks, dataset, counter=counter)
-
-    def policy_network(params, key, obs):
-      return networks['policy'].apply(params, obs).sample(seed=key)
+        random_key=learner_key,
+        networks=networks,
+        dataset=dataset,
+        environment_spec=environment_spec,
+        logger_fn=lambda _, steps_key=None, task=None: logger,
+        counter=counter)
 
     adder = self.builder.make_adder(replay_client)
     self._actor = self.builder.make_actor(
         actor_key,
-        policy_network,
+        policy,
+        environment_spec,
         adder=adder,
         variable_source=self._learner,
     )
@@ -69,11 +75,11 @@ class SACAgent(core.Actor):
     self._num_observations += 1
     self._actor.observe(action, next_timestep)
 
-  def update(self):
+  def update(self, wait=True):
     if self._num_observations <= self._min_observations:
       return
     self._learner.step()
-    self._actor.update(wait=True)
+    self._actor.update(wait=wait)
 
   def get_variables(self, names: Sequence[str]):
     return self._learner.get_variables(names)
