@@ -1,6 +1,0 @@
-dm-acme[jax,tf] @ git+https://github.com/deepmind/acme.git@master#egg=acme
--f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-jax[cuda]==0.3.6
-gym
-wandb
-ml_collections

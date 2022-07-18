@@ -67,8 +67,7 @@ def main(_):
   )
   eval_actor = agent.builder.make_actor(
       jax.random.PRNGKey(FLAGS.seed + 1),
-      mpo.apply_policy_and_sample(
-          agent_networks, spec.actions, eval_mode=True),
+      mpo.apply_policy_and_sample(agent_networks, spec.actions, eval_mode=True),
       spec,
       variable_source=agent,
   )

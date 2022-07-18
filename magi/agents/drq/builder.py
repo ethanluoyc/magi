@@ -1,5 +1,5 @@
 """DrQ agent builder."""
-from typing import Iterator, List, Optional, Dict, Any
+from typing import Any, Dict, Iterator, List, Optional
 
 from acme import adders
 from acme import core

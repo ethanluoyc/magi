@@ -29,7 +29,7 @@ setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     packages=find_packages(),
-    python_requires='>=3.7, <3.9',
+    python_requires='>=3.8, <3.10',
     install_requires=[
         'absl-py',
         'numpy',
@@ -45,7 +45,7 @@ setup(
         'dm-haiku',
         'dm-reverb',
         'dm-launchpad',
-        'dm-acme[jax,launchpad]>=0.2.3',
+        'dm-acme[jax]',
         'dm-tree',
         'ml_collections',
         'gym',
@@ -58,8 +58,8 @@ setup(
         'License :: OSI Approved :: Apache Software License',
         'Operating System :: POSIX :: Linux',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
         'Topic :: Scientific/Engineering :: Artificial Intelligence',
     ],
 )
