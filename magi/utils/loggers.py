@@ -9,7 +9,7 @@ from acme.utils.loggers import filters
 from acme.utils.loggers import terminal
 
 try:
-  import wandb
+  import wandb  # pytype: disable=import-error
 except ImportError:
   wandb = None
 
