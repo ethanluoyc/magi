@@ -64,8 +64,14 @@ class DrQBuilder(builders.ActorLearnerBuilder):
     )
     return dataset.as_numpy_iterator()
 
-  def make_adder(self, replay_client: reverb.Client) -> Optional[adders.Adder]:
+  def make_adder(
+      self,
+      replay_client: reverb.Client,
+      environment_spec: Optional[specs.EnvironmentSpec],
+      policy: Optional[actor_core.FeedForwardPolicy],
+  ) -> Optional[adders.Adder]:
     # TODO(yl): support multi step transitions
+    del environment_spec, policy
     return adders_reverb.NStepTransitionAdder(
         client=replay_client, n_step=1, discount=self._config.discount)
 

@@ -59,7 +59,10 @@ class TD3Builder(builders.ActorLearnerBuilder):
   def make_adder(
       self,
       replay_client: reverb.Client,
+      environment_spec: Optional[specs.EnvironmentSpec],
+      policy: Optional[actor_core.FeedForwardPolicy],
   ) -> Optional[adders.Adder]:
+    del environment_spec, policy
     # TODO(yl): support multi step transitions
     return adders_reverb.NStepTransitionAdder(
         client=replay_client, n_step=1, discount=self._config.discount)

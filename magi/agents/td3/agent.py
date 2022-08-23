@@ -64,7 +64,7 @@ class TD3Agent(acme.Actor, acme.VariableSource):
         environment_spec=environment_spec,
         logger_fn=lambda _, steps_key=None, task=None: logger,
         counter=counter)
-    adder = self.builder.make_adder(replay_client)
+    adder = self.builder.make_adder(replay_client, environment_spec, policy)
     actor = self.builder.make_actor(
         actor_key,
         policy,

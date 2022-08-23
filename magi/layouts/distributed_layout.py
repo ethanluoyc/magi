@@ -195,7 +195,7 @@ class DistributedLayout:
         actor_key,
         policy,
         environment_spec,
-        adder=self._builder.make_adder(replay),
+        adder=self._builder.make_adder(replay, environment_spec, policy),
         variable_source=variable_source,
     )
 
