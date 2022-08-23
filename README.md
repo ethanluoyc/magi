@@ -10,7 +10,9 @@
 
 Magi is a RL library developed on top of [Acme](https://github.com/deepmind/acme).
 
-_Note_: Magi is in alpha development so expect breaking changes!
+__NOTE__: There's a development version of magi available from the `develop`
+branch that is compatible with the HEAD version of Acme. The `main`
+branch is compatible with the latest version of dm-acme on PyPI.
 
 ## Installation
 1. Create a new Python virtual environment
