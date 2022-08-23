@@ -10,10 +10,11 @@ class MPOConfig:
   """MPO agent parameters."""
 
   min_replay_size: int = 1000
-  max_replay_size: int = 1_000_000
+  max_replay_size: int = 1000000
   replay_table_name: str = adders_reverb.DEFAULT_PRIORITY_TABLE
   prefetch_size: Optional[int] = None
-  samples_per_insert: float = 256
+  samples_per_insert: float = 256.0
+  samples_per_insert_tolerance_rate: float = 0.1
 
   discount: float = 0.99
   batch_size: int = 256

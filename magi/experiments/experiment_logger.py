@@ -140,13 +140,13 @@ class LoggerFactory:
     if save_data and workdir is not None:
       loggers.append(
           loggers_lib.CSVLogger(workdir, label=label, add_uid=add_uid))
-      if log_to_wandb:
-        if wandb_kwargs is None:
-          wandb_kwargs = {}
-        loggers.append(
-            logger_wandb.WandbLogger(
-                label=label, steps_key=steps_key, run=wandb_run,
-                **wandb_kwargs))
+    if save_data and log_to_wandb:
+      if wandb_kwargs is None:
+        wandb_kwargs = {}
+      loggers.append(
+          logger_wandb.WandbLogger(
+              label=label, steps_key=steps_key, run=wandb_run,
+              **wandb_kwargs))
 
     # Dispatch to all writers and filter Nones and by time.
     logger = loggers_lib.Dispatcher(loggers, serialize_fn)

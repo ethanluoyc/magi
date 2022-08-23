@@ -20,6 +20,7 @@ from reverb import rate_limiters
 
 from magi.agents.mpo import config as mpo_config
 from magi.agents.mpo import learning as learning_lib
+from magi.agents.mpo import networks as mpo_networks
 
 MPONetworks = Dict[str, networks_lib.FeedForwardNetwork]
 
@@ -49,16 +50,23 @@ class MPOBuilder(builders.ActorLearnerBuilder):
       policy: actor_core.FeedForwardPolicy,
   ) -> List[reverb.Table]:
     del policy
+    samples_per_insert_tolerance = (
+        self._config.samples_per_insert_tolerance_rate *
+        self._config.samples_per_insert)
+    error_buffer = self._config.min_replay_size * samples_per_insert_tolerance
+    limiter = rate_limiters.SampleToInsertRatio(
+        min_size_to_sample=self._config.min_replay_size,
+        samples_per_insert=self._config.samples_per_insert,
+        error_buffer=error_buffer)
     replay_table = reverb.Table(
         name=self._config.replay_table_name,
         sampler=reverb.selectors.Uniform(),
         remover=reverb.selectors.Fifo(),
         max_size=self._config.max_replay_size,
-        rate_limiter=rate_limiters.MinSize(self._config.min_replay_size),
+        rate_limiter=limiter,
         signature=adders_reverb.NStepTransitionAdder.signature(
             environment_spec=environment_spec),
     )
-    # Cache the environment spec here, this is needed as the
     return [replay_table]
 
   def make_dataset_iterator(
@@ -146,3 +154,11 @@ class MPOBuilder(builders.ActorLearnerBuilder):
         logger=logger_fn('learner'),
         counter=counter,
     )
+
+  def make_policy(self,
+                  networks: MPONetworks,
+                  environment_spec: specs.EnvironmentSpec,
+                  evaluation: bool = False) -> actor_core.FeedForwardPolicy:
+    return mpo_networks.apply_policy_and_sample(networks,
+                                                environment_spec.actions,
+                                                evaluation)
