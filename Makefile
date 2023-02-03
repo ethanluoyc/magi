@@ -35,6 +35,7 @@ clean:
 	rm -rf *.egg-info
 	rm -rf .pytest_cache
 	rm -rf .pytype
+	rm -rf .nox
 
 .PHONY: lint
 lint:

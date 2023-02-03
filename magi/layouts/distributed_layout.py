@@ -66,8 +66,9 @@ def default_evaluator(
 
     # Make actor
     actor = builder.make_actor(
-        policy_network=policy_factory(agent_networks),
-        random_key=actor_key,
+        actor_key,
+        policy_factory(agent_networks),
+        environment_spec,
         variable_source=variable_source,
     )
 
@@ -91,7 +92,7 @@ class DistributedLayout:
       environment_factory: EnvironmentFactory,
       network_factory: NetworkFactory,
       policy_factory: PolicyFactory,
-      builder: builders.GenericActorLearnerBuilder,
+      builder: builders.ActorLearnerBuilder,
       num_actors: int,
       *,
       environment_spec: specs.EnvironmentSpec = None,
@@ -129,7 +130,9 @@ class DistributedLayout:
     tf.config.experimental.set_visible_devices([], 'GPU')
     environment_spec = self._environment_spec or specs.make_environment_spec(
         self._environment_factory(self._seed, True))
-    return self._builder.make_replay_tables(environment_spec=environment_spec)
+    agent_networks = self._network_factory(environment_spec)
+    policy = self._policy_factory(agent_networks)
+    return self._builder.make_replay_tables(environment_spec, policy)
 
   def counter(self):
     """The global counter."""
@@ -164,6 +167,8 @@ class DistributedLayout:
         random_key,
         networks,
         dataset=iterator,
+        logger_fn=self._logger_fn,
+        environment_spec=environment_spec,
         counter=counter,
     )
 
@@ -185,11 +190,12 @@ class DistributedLayout:
         _random_key_to_seed(environment_key), False)
     environment_spec = specs.make_environment_spec(environment)
     agent_networks = self._network_factory(environment_spec)
-    policy_network = self._policy_factory(agent_networks)
+    policy = self._policy_factory(agent_networks)
     actor = self._builder.make_actor(
-        random_key=actor_key,
-        policy_network=policy_network,
-        adder=self._builder.make_adder(replay),
+        actor_key,
+        policy,
+        environment_spec,
+        adder=self._builder.make_adder(replay, environment_spec, policy),
         variable_source=variable_source,
     )
 

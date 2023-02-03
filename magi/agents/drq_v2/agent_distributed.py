@@ -36,14 +36,7 @@ class DistributedDrQV2(distributed_layout.DistributedLayout):
       environment_spec = specs.make_environment_spec(
           environment_factory(seed, True))
 
-    learner_logger_fn = lambda: logger_fn(
-        'learner',
-        time_delta=self._log_every,
-        save_data=True,
-        steps_key='learner_steps',
-    )
-
-    builder = drq_v2_builder.DrQV2Builder(config, learner_logger_fn)
+    builder = drq_v2_builder.DrQV2Builder(config)
     self._builder = builder
 
     def policy_factory(networks):

@@ -39,13 +39,15 @@ class MPO(agent_lib.Agent):
     config.samples_per_insert_tolerance_rate = float('inf')
     config.min_replay_size = 1
     config.min_observations = min_replay_size
-    self.builder = mpo_builder.MPOBuilder(config, logger_fn=lambda: logger)
+    policy = mpo_networks.apply_policy_and_sample(
+        networks, environment_spec.actions, eval_mode=False)
+    self.builder = mpo_builder.MPOBuilder(config)
 
     random_key = jax.random.PRNGKey(seed)
     learner_key, actor_key = jax.random.split(random_key)
 
     # Setup reverb
-    replay_tables = self.builder.make_replay_tables(environment_spec)
+    replay_tables = self.builder.make_replay_tables(environment_spec, policy)
     replay_server = reverb.Server(replay_tables, port=None)
     self._server = replay_server
 
@@ -56,14 +58,20 @@ class MPO(agent_lib.Agent):
     if config.prefetch_size is not None and config.prefetch_size > 1:
       device = jax.devices()[0] if device_prefetch else None
       dataset = utils.prefetch(dataset, config.prefetch_size, device)
-    learner = self.builder.make_learner(
-        learner_key, networks, dataset, counter=counter)
 
-    adder = self.builder.make_adder(replay_client)
+    learner = self.builder.make_learner(
+        random_key=learner_key,
+        networks=networks,
+        dataset=dataset,
+        environment_spec=environment_spec,
+        logger_fn=lambda _, steps_key=None, task=None: logger,
+        counter=counter)
+
+    adder = self.builder.make_adder(replay_client, environment_spec, policy)
     actor = self.builder.make_actor(
         actor_key,
-        mpo_networks.apply_policy_and_sample(
-            networks, environment_spec.actions, eval_mode=False),
+        policy,
+        environment_spec,
         adder=adder,
         variable_source=learner,
     )

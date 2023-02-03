@@ -45,9 +45,10 @@ class TD3Agent(acme.Actor, acme.VariableSource):
   ):
     min_replay_size = config.min_replay_size
     config.min_replay_size = 1
-    self.builder = builder_lib.TD3Builder(config, logger_fn=lambda: logger)
+    self.builder = builder_lib.TD3Builder(config)
     # Create the replay server and grab its address.
-    replay_tables = self.builder.make_replay_tables(environment_spec)
+    policy = td3_networks.apply_policy_sample(networks, eval_mode=False)
+    replay_tables = self.builder.make_replay_tables(environment_spec, policy)
     replay_server = reverb.Server(replay_tables, port=None)
     replay_client = reverb.Client(f'localhost:{replay_server.port}')
 
@@ -57,15 +58,17 @@ class TD3Agent(acme.Actor, acme.VariableSource):
 
     dataset = self.builder.make_dataset_iterator(replay_client)
     learner = self.builder.make_learner(
-        learner_key,
-        networks,
-        dataset,
-        counter=counter,
-    )
-    adder = self.builder.make_adder(replay_client)
+        random_key=learner_key,
+        networks=networks,
+        dataset=dataset,
+        environment_spec=environment_spec,
+        logger_fn=lambda _, steps_key=None, task=None: logger,
+        counter=counter)
+    adder = self.builder.make_adder(replay_client, environment_spec, policy)
     actor = self.builder.make_actor(
         actor_key,
-        td3_networks.apply_policy_sample(networks, eval_mode=False),
+        policy,
+        environment_spec,
         adder=adder,
         variable_source=learner,
     )

@@ -1,8 +1,0 @@
--r tests.in
-pylint
-isort
-yapf
-pytype
-pre-commit
-pip-compile-multi
-nox

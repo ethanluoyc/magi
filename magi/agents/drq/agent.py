@@ -1,5 +1,5 @@
 """Data-regularized Q (DrQ) agent."""
-from typing import Any, Mapping, Optional
+from typing import Any, Dict, Optional
 
 from acme import core
 from acme import specs
@@ -20,19 +20,21 @@ class DrQAgent(core.Actor, core.VariableSource):
   def __init__(
       self,
       environment_spec: specs.EnvironmentSpec,
-      networks: Mapping[str, Any],
+      networks: Dict[str, Any],
       config: drq_config.DrQConfig,
       seed: int,
       counter: Optional[counting.Counter] = None,
       logger: Optional[loggers.Logger] = None,
   ):
     # Setup reverb
-    self.builder = builder.DrQBuilder(config, logger_fn=lambda: logger)
+    self.builder = builder.DrQBuilder(config)
     learner_key, actor_key = jax.random.split(jax.random.PRNGKey(seed))
     self._num_observations = 0
     self._min_observations = config.min_replay_size
 
-    replay_tables = self.builder.make_replay_tables(environment_spec)
+    policy = drq_networks.apply_policy_sample(networks, eval_mode=False)
+
+    replay_tables = self.builder.make_replay_tables(environment_spec, policy)
     replay_server = reverb.Server(replay_tables, port=None)
     self._server = replay_server
 
@@ -44,12 +46,18 @@ class DrQAgent(core.Actor, core.VariableSource):
     dataset = self.builder.make_dataset_iterator(replay_client)
 
     self._learner = self.builder.make_learner(
-        learner_key, networks, dataset, counter=counter)
+        random_key=learner_key,
+        networks=networks,
+        dataset=dataset,
+        environment_spec=environment_spec,
+        logger_fn=lambda _, steps_key=None, task=None: logger,
+        counter=counter)
 
-    adder = self.builder.make_adder(replay_client)
+    adder = self.builder.make_adder(replay_client, environment_spec, policy)
     self._actor = self.builder.make_actor(
         actor_key,
-        drq_networks.apply_policy_sample(networks, eval_mode=False),
+        policy,
+        environment_spec,
         adder=adder,
         variable_source=self._learner,
     )

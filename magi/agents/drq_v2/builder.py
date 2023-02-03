@@ -1,5 +1,5 @@
 """DrQ-v2 builder"""
-from typing import Callable, Iterator, List, Optional
+from typing import Iterator, List, Optional
 
 from acme import adders
 from acme import core
@@ -24,18 +24,15 @@ from magi.agents.drq_v2 import networks as drq_v2_networks
 class DrQV2Builder(builders.ActorLearnerBuilder):
   """DrQ-v2 Builder."""
 
-  def __init__(
-      self,
-      config: drq_v2_config.DrQV2Config,
-      logger_fn: Callable[[], loggers.Logger],
-  ):
+  def __init__(self, config: drq_v2_config.DrQV2Config):
     self._config = config
-    self._logger_fn = logger_fn
 
   def make_replay_tables(
       self,
       environment_spec: specs.EnvironmentSpec,
+      policy: drq_v2_networks.DrQV2PolicyNetwork,
   ) -> List[reverb.Table]:
+    del policy
     samples_per_insert_tolerance = (
         self._config.samples_per_insert_tolerance_rate *
         self._config.samples_per_insert)
@@ -69,7 +66,13 @@ class DrQV2Builder(builders.ActorLearnerBuilder):
     )
     return dataset.as_numpy_iterator()
 
-  def make_adder(self, replay_client: reverb.Client) -> Optional[adders.Adder]:
+  def make_adder(
+      self,
+      replay_client: reverb.Client,
+      environment_spec: Optional[specs.EnvironmentSpec],
+      policy: Optional[drq_v2_networks.DrQV2PolicyNetwork],
+  ) -> Optional[adders.Adder]:
+    del environment_spec, policy
 
     return adders_reverb.NStepTransitionAdder(
         client=replay_client,
@@ -80,10 +83,12 @@ class DrQV2Builder(builders.ActorLearnerBuilder):
   def make_actor(
       self,
       random_key: networks_lib.PRNGKey,
-      policy_network: drq_v2_networks.DrQV2PolicyNetwork,
-      adder: Optional[adders.Adder] = None,
+      policy: drq_v2_networks.DrQV2PolicyNetwork,
+      environment_spec: specs.EnvironmentSpec,
       variable_source: Optional[core.VariableSource] = None,
+      adder: Optional[adders.Adder] = None,
   ) -> core.Actor:
+    del environment_spec
     assert variable_source is not None
     device = None
     variable_client = variable_utils.VariableClient(
@@ -91,7 +96,7 @@ class DrQV2Builder(builders.ActorLearnerBuilder):
     variable_client.update_and_wait()
 
     return acting_lib.DrQV2Actor(
-        policy_network,
+        policy,
         random_key,
         variable_client=variable_client,
         adder=adder,
@@ -103,11 +108,13 @@ class DrQV2Builder(builders.ActorLearnerBuilder):
       random_key: networks_lib.PRNGKey,
       networks: drq_v2_networks.DrQV2Networks,
       dataset: Iterator[reverb.ReplaySample],
+      logger_fn: loggers.LoggerFactory,
+      environment_spec: specs.EnvironmentSpec,
       replay_client: Optional[reverb.Client] = None,
       counter: Optional[counting.Counter] = None,
-  ) -> core.Learner:
+  ) -> learning_lib.DrQV2Learner:
+    del replay_client, environment_spec
 
-    del replay_client
     config = self._config
     critic_optimizer = optax.adam(config.learning_rate)
     policy_optimizer = optax.adam(config.learning_rate)
@@ -137,6 +144,6 @@ class DrQV2Builder(builders.ActorLearnerBuilder):
         critic_soft_update_rate=config.critic_q_soft_update_rate,
         discount=config.discount,
         noise_clip=config.noise_clip,
-        logger=self._logger_fn(),
+        logger=logger_fn('learner'),
         counter=counter,
     )

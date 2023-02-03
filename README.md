@@ -8,11 +8,17 @@
 
 [![pytest](https://github.com/ethanluoyc/magi/actions/workflows/ci.yaml/badge.svg?branch=develop)](https://github.com/ethanluoyc/magi/actions/workflows/ci.yaml)
 
-Magi is a RL library developed on top of [Acme](https://github.com/deepmind/acme).
+Magi is a RL library in JAX that is fully compatible with [Acme](https://github.com/deepmind/acme).
 
-__NOTE__: There's a development version of magi available from the `develop`
-branch that is compatible with the HEAD version of Acme. The `main`
-branch is compatible with the latest version of dm-acme on PyPI.
+In addition to the features provided by Acme, Magi offers implementation of RL
+agents that are not found in the Acme repository as well as providing useful tools
+for integrating experiment logging services such as WandB.
+
+_Note_:
+Magi is in alpha development so expect breaking changes!
+
+Magi currently depends on HEAD version of dm-acme instead of the latest
+release version on PyPI which is fairly old.
 
 ## Installation
 1. Create a new Python virtual environment
@@ -25,8 +31,16 @@ source venv/bin/activate
 
 ```bash
 pip install -U pip setuptools wheel
-pip install -r requirements/base.txt # This uses pinned dependencies, you may adjust this for your needs.
+# Magi depends on latest version of dm-acme.
+# The dependencies in setup.py are abstract which allows you to pin
+# a specific version of dm-acme.
+# The following command installs the latest version of dm-acme
+pip install 'git+https://github.com/deepmind/acme.git#egg=dm-acme[jax]'
+# Install magi in editable mode, with additional dependencies.
 pip install -e .
+# In case you need to run examples on GPU, you should install the
+# GPU version of JAX with a command like the following
+pip install 'jax[cuda]==0.3.6' -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 ```
 
 If for some reason installation fails, first check out GitHub Actions
@@ -40,7 +54,7 @@ magi includes popular RL algorithm implementation such as SAC, DrQ, SAC-AE and P
 Refer to [magi/agents](./magi/agents) for a full list of agents.
 
 ## Examples
-Check out [magi/examples](./magi/examples) where
+Check out [examples](./examples) where
 we include examples of using our RL agents on popular benchmark tasks.
 
 ## Testing

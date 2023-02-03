@@ -45,7 +45,7 @@ class MLP(hk.Module):
     return x
 
 
-class DeltaOrthogonal(hk.initializers.Initializer):
+class DeltaOrthogonal:
   """Delta-orthogonal initializer."""
 
   def __init__(self, scale=1.0, axis=-1):
