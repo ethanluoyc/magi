@@ -152,6 +152,7 @@ disable=abstract-method,
         # missing-docstring, # TODO(yl): reenable these over time.
         unnecessary-lambda-assignment,
         unnecessary-lambda,
+        missing-docstring
 
 
 [REPORTS]
