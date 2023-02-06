@@ -165,13 +165,13 @@ class MPOLearner(acme.Learner):
       steps = state.steps + 1
 
       # Periodically update target networks.
-      target_policy_params = rlax.periodic_update(
+      target_policy_params = optax.periodic_update(
           policy_params,
           state.target_policy_params,
           steps,
           target_policy_update_period,
       )
-      target_critic_params = rlax.periodic_update(
+      target_critic_params = optax.periodic_update(
           critic_params,
           state.target_critic_params,
           steps,
