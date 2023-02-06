@@ -15,42 +15,42 @@ def make_logger(
     asynchronous: bool = False,
     print_fn=None,
     serialize_fn=base.to_numpy,
-    steps_key: str = 'steps',
+    steps_key: str = "steps",
     use_wandb=True,
     wandb_kwargs=None,
 ) -> base.Logger:
-  """Make a default Acme logger.
+    """Make a default Acme logger.
 
-  Args:
-    label: Name to give to the logger.
-    save_data: Whether to persist data.
-    time_delta: Time (in seconds) between logging events.
-    asynchronous: Whether the write function should block or not.
-    print_fn: How to print to terminal (defaults to print).
-    serialize_fn: An optional function to apply to the write inputs before
-      passing them to the various loggers.
-    steps_key: Ignored.
+    Args:
+      label: Name to give to the logger.
+      save_data: Whether to persist data.
+      time_delta: Time (in seconds) between logging events.
+      asynchronous: Whether the write function should block or not.
+      print_fn: How to print to terminal (defaults to print).
+      serialize_fn: An optional function to apply to the write inputs before
+        passing them to the various loggers.
+      steps_key: Ignored.
 
-  Returns:
-    A logger object that responds to logger.write(some_dict).
-  """
-  if not print_fn:
-    print_fn = logging.info
-  terminal_logger = terminal.TerminalLogger(label=label, print_fn=print_fn)
+    Returns:
+      A logger object that responds to logger.write(some_dict).
+    """
+    if not print_fn:
+        print_fn = logging.info
+    terminal_logger = terminal.TerminalLogger(label=label, print_fn=print_fn)
 
-  loggers = [terminal_logger]
-  if use_wandb:
-    if wandb_kwargs is None:
-      wandb_kwargs = {}
-    loggers.append(
-        wandb.WandbLogger(label=label, steps_key=steps_key, **wandb_kwargs))
+    loggers = [terminal_logger]
+    if use_wandb:
+        if wandb_kwargs is None:
+            wandb_kwargs = {}
+        loggers.append(
+            wandb.WandbLogger(label=label, steps_key=steps_key, **wandb_kwargs)
+        )
 
-  # Dispatch to all writers and filter Nones and by time.
-  logger = aggregators.Dispatcher(loggers, serialize_fn)
-  logger = filters.NoneFilter(logger)
-  if asynchronous:
-    logger = async_logger.AsyncLogger(logger)
-  logger = filters.GatedFilter(
-      logger, gating_fn=lambda t: t % log_frequency == 0)
+    # Dispatch to all writers and filter Nones and by time.
+    logger = aggregators.Dispatcher(loggers, serialize_fn)
+    logger = filters.NoneFilter(logger)
+    if asynchronous:
+        logger = async_logger.AsyncLogger(logger)
+    logger = filters.GatedFilter(logger, gating_fn=lambda t: t % log_frequency == 0)
 
-  return logger
+    return logger

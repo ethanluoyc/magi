@@ -1,6 +1,6 @@
 # Visual Continuous Control with DrQ-v2
 
-This project includes experimental training scripts for running single-process 
+This project includes experimental training scripts for running single-process
 and distributed implmentation of DrQ-v2 from
 
 > Mastering Visual Continuous Control: Improved Data-Augmented Reinforcement Learning,

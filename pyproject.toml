@@ -3,10 +3,11 @@ requires = ["setuptools >= 40.6.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.isort]
-profile = "google"
-src_paths = ["magi"]
-known_first_party = ["magi"]
+profile = "black"
+skip_gitignore = true
+force_single_line = true  # Google style.
+single_line_exclusions = ["typing"]
 
-[tool.yapf]
-based_on_style = "yapf"
-indent_width = 2
+[tool.black]
+line-length = 88
+target-version = ["py38", "py39"]

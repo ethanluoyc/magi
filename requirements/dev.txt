@@ -1,6 +1,6 @@
 pylint==2.14.2
 isort==5.10.1
-yapf==0.32.0
+black==23.1.0
 pytype
 pre-commit
 pip-compile-multi
