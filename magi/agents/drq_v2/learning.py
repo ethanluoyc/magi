@@ -27,7 +27,7 @@ def _soft_update(
   """
     Update target network using Polyak-Ruppert Averaging.
     """
-  return jax.tree_multimap(lambda t, s: (1 - tau) * t + tau * s, target_params,
+  return jax.tree_map(lambda t, s: (1 - tau) * t + tau * s, target_params,
                            online_params)
 
 

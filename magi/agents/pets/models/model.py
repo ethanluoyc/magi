@@ -126,7 +126,7 @@ class EnsembleModel:
     for r in rngs:
       params_list.append(self._network.init(r, inputs))
     # pylint: disable=no-value-for-parameter
-    ensem_params = jax.tree_multimap(lambda *x: jnp.stack(x), *params_list)
+    ensem_params = jax.tree_map(lambda *x: jnp.stack(x), *params_list)
 
     mean = jnp.zeros(inputs.shape[-1], dtype=jnp.float32)
     std = jnp.ones(inputs.shape[-1], dtype=jnp.float32)

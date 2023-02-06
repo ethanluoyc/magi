@@ -162,7 +162,7 @@ class IQLLearner(acme.Learner):
           critic_grads, state.critic_opt_state)
       critic_params = optax.apply_updates(state.critic_params, critic_updates)
 
-      target_critic_params = jax.tree_multimap(
+      target_critic_params = jax.tree_map(
           lambda p, tp: p * tau + tp * (1 - tau),
           critic_params,
           state.target_critic_params,
