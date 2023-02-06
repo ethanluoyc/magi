@@ -31,7 +31,7 @@ class TDMPC(acme.Actor, acme.VariableSource):
         per_alpha: float = 0.6,
         per_beta: float = 0.4,
         discount: float = 0.99,
-        num_samples: float = 512,
+        num_samples: int = 512,
         min_std: float = 0.05,
         temperature: float = 0.5,
         momentum: float = 0.1,
@@ -131,8 +131,8 @@ class TDMPC(acme.Actor, acme.VariableSource):
     def observe(self, action, next_timestep):
         self._actor.observe(action, next_timestep)
 
-    def select_action(self, obs):
-        return self._actor.select_action(obs)
+    def select_action(self, observation):
+        return self._actor.select_action(observation)
 
     def _maybe_train(self):
         trained = False

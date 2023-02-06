@@ -14,7 +14,7 @@
 """JAX experiment config."""
 
 import dataclasses
-from typing import Any, Callable, Generic, Iterator, Optional, Sequence
+from typing import Any, Callable, Iterator, Optional, Sequence
 
 import jax
 from acme import core
@@ -132,9 +132,7 @@ class ExperimentConfig:
 
 
 @dataclasses.dataclass
-class OfflineExperimentConfig(
-    Generic[builders.Networks, builders.Policy, builders.Sample]
-):
+class OfflineExperimentConfig:
     """Config which defines aspects of constructing an offline RL experiment.
 
     This class is similar to the ExperimentConfig, but is tailored to offline RL

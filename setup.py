@@ -45,7 +45,7 @@ setup(
         "dm-haiku",
         "dm-reverb",
         "dm-launchpad",
-        "dm-acme[jax]",
+        "dm-acme",
         "dm-tree",
         "ml_collections",
         "gym",

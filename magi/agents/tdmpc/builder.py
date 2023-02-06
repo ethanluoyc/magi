@@ -36,7 +36,7 @@ class TDMPCConfig:
     per_alpha: float = 0.6
     per_beta: float = 0.4
     discount: float = 0.99
-    num_samples: float = 512
+    num_samples: int = 512
     min_std: float = 0.05
     temperature: float = 0.5
     momentum: float = 0.1
@@ -108,7 +108,7 @@ class TDMPCBuilder(builders.ActorLearnerBuilder):
         random_key: networks_lib.PRNGKey,
         policy: TDMPCPolicy,
         environment_spec: specs.EnvironmentSpec,
-        variable_source: learning.TDMPCLearner = None,
+        variable_source: Optional[learning.TDMPCLearner] = None,
         adder: Optional[adders.Adder] = None,
     ) -> acting.TDMPCActor:
         networks, evaluation = policy

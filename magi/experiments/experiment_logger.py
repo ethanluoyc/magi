@@ -37,7 +37,10 @@ class LoggerFactory:
         self._log_to_wandb = log_to_wandb
         self._run = None
         if log_to_wandb and self._run is None:
+            # pytype: disable=import-error
             import wandb  # pylint: disable=import-outside-toplevel
+
+            # pytype: enable=import-error
 
             wandb.require("service")
             self._run = wandb.init(**wandb_kwargs)
@@ -120,7 +123,7 @@ class LoggerFactory:
         serialize_fn=base.to_numpy,
         steps_key: str = "steps",
         log_to_wandb: bool = False,
-        wandb_kwargs: Dict[str, Any] = None,
+        wandb_kwargs: Optional[Dict[str, Any]] = None,
         add_uid: bool = False,
         wandb_run=None,
     ) -> base.Logger:

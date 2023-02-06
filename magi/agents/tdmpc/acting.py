@@ -26,7 +26,7 @@ class TDMPCActor(core.Actor):
         std_schedule: optax.Schedule,
         horizon_schedule: optax.Schedule,
         discount: float = 0.99,
-        num_samples: float = 512,
+        num_samples: int = 512,
         min_std: float = 0.05,
         temperature: float = 0.5,
         momentum: float = 0.1,
