@@ -1,3 +1,13 @@
 """Magi is a JAX RL library."""
 
-from magi._metadata import __version__
+
+try:
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version
+
+    __version__ = version("magi")
+
+    del version, PackageNotFoundError
+except PackageNotFoundError:
+    # package is not installed
+    pass

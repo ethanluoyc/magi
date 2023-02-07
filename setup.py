@@ -1,14 +1,7 @@
 #!/usr/bin/env python3
 """Install scripts for setuptools."""
-from importlib import util as import_util
-
 from setuptools import find_packages
 from setuptools import setup
-
-spec = import_util.spec_from_file_location("_metadata", "magi/_metadata.py")
-_metadata = import_util.module_from_spec(spec)
-spec.loader.exec_module(_metadata)
-version = _metadata.__version__
 
 with open("README.md", "rt", encoding="utf-8") as f:
     long_description = f.read()
@@ -35,7 +28,6 @@ jax_requirements = [
 
 setup(
     name="magi",
-    version=version,
     description="Reinforcement Learning in JAX",
     license="Apache License, Version 2.0",
     url="https://github.com/ethanluoyc/magi/",
@@ -50,6 +42,8 @@ setup(
     long_description_content_type="text/markdown",
     packages=find_packages(),
     python_requires=">=3.8, <3.10",
+    use_scm_version=True,
+    setup_requires=["setuptools_scm"],
     install_requires=["absl-py", "dm-tree", "numpy", "dm-acme", "gym"],
     extras_require={"jax": jax_requirements},
     classifiers=[
