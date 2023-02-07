@@ -13,6 +13,26 @@ version = _metadata.__version__
 with open("README.md", "rt", encoding="utf-8") as f:
     long_description = f.read()
 
+tf_requirements = [
+    "tensorflow",
+    "tensorflow_probability",
+    "rlds",
+    # Reverb and launchpad must pinned against specific versions of TF
+    "dm-reverb",
+    "dm-launchpad",
+]
+
+jax_requirements = [
+    # Pinned with jax<0.4 as the pinned version of TF/TFP is not compatible
+    # with jax>=0.4. However, if you use later versions of TFP/TF magi should work fine.
+    "jax<0.4",
+    "jaxlib",
+    "chex",
+    "optax",
+    "dm-haiku",
+    "rlax",
+] + tf_requirements
+
 setup(
     name="magi",
     version=version,
@@ -30,27 +50,8 @@ setup(
     long_description_content_type="text/markdown",
     packages=find_packages(),
     python_requires=">=3.8, <3.10",
-    install_requires=[
-        "absl-py",
-        "numpy",
-        # Tensorflow
-        "tensorflow",
-        "tensorflow_probability",
-        # JAX
-        "jax",
-        # DeepMind JAX eco-system
-        "chex",
-        "optax",
-        "rlax",
-        "dm-haiku",
-        "dm-reverb",
-        "dm-launchpad",
-        "dm-acme",
-        "dm-tree",
-        "ml_collections",
-        "gym",
-        "PyYAML",
-    ],
+    install_requires=["absl-py", "dm-tree", "numpy", "dm-acme", "gym"],
+    extras_require={"jax": jax_requirements},
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Environment :: Console",

@@ -27,7 +27,7 @@ python3 -m venv venv
 source venv/bin/activate
 ```
 
-2. Install dependencies and the package in editable mode by running
+2. Install dependencies with the following commands.
 
 ```bash
 pip install -U pip setuptools wheel
@@ -35,13 +35,22 @@ pip install -U pip setuptools wheel
 # The dependencies in setup.py are abstract which allows you to pin
 # a specific version of dm-acme.
 # The following command installs the latest version of dm-acme
-pip install 'git+https://github.com/deepmind/acme.git#egg=dm-acme[jax]'
+pip install 'git+https://github.com/deepmind/acme.git#egg=dm-acme[jax,tf,examples]'
 # Install magi in editable mode, with additional dependencies.
-pip install -e .
 # In case you need to run examples on GPU, you should install the
 # GPU version of JAX with a command like the following
-pip install 'jax[cuda]==0.3.6' -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+pip install 'jax[cuda]<0.4' -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+pip install -e '.[jax]'
 ```
+
+The base installation for magi does not list TensorFlow/JAX as a dependency.
+However, note that JAX requires platform-specific installation
+(CPU/GPU and CUDA versions). Furthermore, Acme depends on Reverb and LaunchPad
+which requires them to be pinned against specific versions of TensorFlow. This should
+be handled if you use install dm-acme with [jax,tf] extras. However, you can also
+use install with different versions of TensorFlow/Reverb/Launchpad. In that case,
+you should omit the extras and find compatible versions and pin those versions
+accordingly.
 
 If for some reason installation fails, first check out GitHub Actions
 badge to see if this fails on the latest CI run. If the CI is successful,
@@ -60,7 +69,7 @@ we include examples of using our RL agents on popular benchmark tasks.
 ## Testing
 On Linux, you can run tests with
 ```
-JAX_PLATFORM_NAME=cpu pytest -n `grep -c ^processor /proc/cpuinfo` magi
+nox test
 ```
 
 ## Contributing

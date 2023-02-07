@@ -1,10 +1,6 @@
 SRC = magi
 N_CPUS ?= $(shell grep -c ^processor /proc/cpuinfo)
 
-.PHONY: typecheck
-typecheck:
-	pytype -k -j $(N_CPUS) $(SRC)
-
 .PHONY: test
 test:
 	JAX_PLATFORM_NAME=cpu pytest -n $(N_CPUS) \
@@ -44,5 +40,6 @@ lint:
 .PHONY: install
 install:
 	pip install -U pip setuptools wheel
+	pip install 'git+https://github.com/deepmind/acme.git#egg=dm-acme[jax,tf,examples]'
+	pip install -e '.[jax]'
 	pip install -r requirements/dev.txt
-	pip install -e .
