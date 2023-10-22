@@ -6,7 +6,11 @@
 **[Contributing](./CONTRIBUTING.md)** |
 **[Documentation](./docs)**
 
+
 [![pytest](https://github.com/ethanluoyc/magi/actions/workflows/ci.yaml/badge.svg?branch=develop)](https://github.com/ethanluoyc/magi/actions/workflows/ci.yaml)
+
+> **Note**
+> Future development of JAX agents in Magi have moved to [Corax](https://github.com/ethanluoyc/corax)
 
 Magi is a RL library in JAX that is fully compatible with [Acme](https://github.com/deepmind/acme).
 
